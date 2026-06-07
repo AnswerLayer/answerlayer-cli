@@ -11,7 +11,7 @@ npm install -g @answerlayer/cli
 For local development:
 
 ```bash
-git clone <repo-url> answerlayer-cli
+git clone https://github.com/AnswerLayer/answerlayer-cli.git
 cd answerlayer-cli
 npm link
 ```
@@ -21,14 +21,21 @@ npm link
 Create an API key in AnswerLayer with the scopes needed by your workflow, then run:
 
 ```bash
-answerlayer configure --base-url https://app.example.com --api-key al_live_...
+answerlayer configure --api-key al_live_...
+```
+
+The CLI talks to the hosted SaaS at `https://app.answerlayer.io` by default. For a
+BYOC or self-hosted install, point it at your own URL:
+
+```bash
+answerlayer configure --api-key al_live_... --base-url https://answerlayer.your-company.com
 ```
 
 You can also skip the config file and use environment variables:
 
 ```bash
-export ANSWERLAYER_BASE_URL=https://app.example.com
 export ANSWERLAYER_API_KEY=al_live_...
+export ANSWERLAYER_BASE_URL=https://answerlayer.your-company.com  # optional override
 ```
 
 The CLI sends API keys using the `X-API-Key` header.
@@ -103,6 +110,10 @@ npm test
 
 The package intentionally has no runtime dependencies. It requires Node.js 20 or newer for built-in `fetch`.
 
+## Related projects
+
+- [`answerlayer-go`](https://github.com/AnswerLayer/answerlayer-go) — Go client/SDK for the Inquiry API.
+
 ## License
 
-MIT
+[Apache 2.0](LICENSE)

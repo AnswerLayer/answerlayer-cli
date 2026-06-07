@@ -2,7 +2,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { AnswerLayerClient } from "./client.js";
 import { formatJson, formatList, formatQueryResult } from "./format.js";
-import { readConfig, resolveAuth, writeConfig } from "./config.js";
+import { DEFAULT_BASE_URL, readConfig, resolveAuth, writeConfig } from "./config.js";
 
 const SEMANTIC_RESOURCES = new Set([
   "entities",
@@ -58,11 +58,11 @@ export async function main(argv, io) {
 
 function configure(parsed, io) {
   const existing = readConfig(io.env);
-  const baseUrl = firstValue(parsed.flags.baseUrl) || existing.baseUrl;
+  const baseUrl = firstValue(parsed.flags.baseUrl) || existing.baseUrl || DEFAULT_BASE_URL;
   const apiKey = firstValue(parsed.flags.apiKey) || existing.apiKey;
 
-  if (!baseUrl || !apiKey) {
-    throw usage("configure requires --base-url and --api-key");
+  if (!apiKey) {
+    throw usage("configure requires --api-key (--base-url defaults to https://app.answerlayer.io)");
   }
 
   const configPath = writeConfig({ ...existing, baseUrl, apiKey }, io.env);
