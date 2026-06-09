@@ -1,0 +1,114 @@
+---
+name: answerlayer
+description: Query databases in natural language with AnswerLayer. Use when the user wants to set up or configure AnswerLayer, connect to their data, ask analytical or business questions about a database (revenue, users, counts, "top N", trends, metrics), run SQL through AnswerLayer, or manage AnswerLayer connections, saved queries, the semantic layer, or dashboards.
+---
+
+# AnswerLayer
+
+AnswerLayer turns natural-language questions into governed SQL against the user's
+connected databases. This skill drives the **AnswerLayer CLI**, which talks to
+the AnswerLayer API with an API key.
+
+Work in three steps: **resolve the CLI → ensure it's configured → use it.**
+
+## 1. Resolve the CLI command (`AL`)
+
+Pick the command once per session and reuse it. Run:
+
+```bash
+command -v answerlayer.js >/dev/null && echo answerlayer.js \
+  || command -v answerlayer >/dev/null && echo answerlayer \
+  || echo "npx -y @answerlayer/cli"
+```
+
+- `answerlayer.js` — ships with this plugin and is on your PATH (works offline).
+- `answerlayer` — a global npm install (`npm i -g @answerlayer/cli`).
+- `npx -y @answerlayer/cli` — fallback; downloads from npm on first use.
+
+Use whichever it prints as `AL` below. All three run identical code.
+
+## 2. Ensure it's configured
+
+The CLI needs a base URL (defaults to `https://app.answerlayer.io`) and an API
+key sent as `X-API-Key`. Check whether credentials already exist:
+
+```bash
+AL auth me --json
+```
+
+- If it returns the caller's identity, you're configured — continue to step 3.
+- If it errors with a missing-key/auth error, set credentials up:
+
+  1. Ask the user for their **API key**. Also ask for their **host** only if
+     they're on a BYOC / self-hosted install; otherwise the default
+     `https://app.answerlayer.io` is correct.
+  2. Configure (omit `--base-url` to accept the default):
+
+     ```bash
+     AL configure --api-key <KEY> [--base-url https://answerlayer.their-host.com]
+     ```
+
+     This writes `~/.answerlayer/config.json` (mode 0600). Alternatively the user
+     can export `ANSWERLAYER_API_KEY` (and optionally `ANSWERLAYER_BASE_URL`).
+  3. Re-run `AL auth me --json` to confirm.
+
+**Never print, echo, or log the API key.** Pass it straight to `configure`. Tell
+the user keys are created in the AnswerLayer dashboard under **Settings → API
+Keys** and are shown only once.
+
+## 3. Use it
+
+Most questions need a **connection** (a database). List them and grab an `id`:
+
+```bash
+AL connections list            # human table; add --json to parse
+```
+
+### Ask questions in natural language (preferred for analytical questions)
+
+```bash
+# First question — use --json to capture the session id for follow-ups
+AL inquiry ask --connection <connection-id> --json "What was revenue last month?"
+
+# Follow-up in the same conversation (carries prior context)
+AL inquiry ask --session <session-id> --json "Break that down by region"
+```
+
+The JSON includes `session_id`, `final_response`, and `sql_queries`. Show the
+user `final_response`; surface the SQL when they want to see how it was derived.
+Without `--json` it prints the answer followed by the SQL as plain text.
+
+### Run SQL directly
+
+```bash
+AL query run <connection-id> --sql "select count(*) from orders" --format table
+AL query run <connection-id> --file ./report.sql --format csv
+AL query validate <connection-id> --sql "select * from orders"
+```
+
+### Other resources
+
+These follow `AL <group> <command>`. Run `AL <group> --help` (or `AL --help`)
+to see exact flags before using one:
+
+- `saved-queries` — list / get / create / execute reusable queries
+- `semantic` — entities, relationships, measures, metrics, dimensions, filters
+  (most need `--connection <id>`)
+- `dashboards`, `tiles` — build and read dashboards
+- `documents` — upload business-context docs and link them to connections
+- `connections` — create / test / inspect schema
+- `metadata`, `api-keys`, `users`, `org`, `billing`, `stats`
+
+## Conventions
+
+- Prefer `inquiry ask` for analytical/business questions; use `query run` only
+  when the user gives or wants explicit SQL.
+- Add `--json` whenever you need to parse output programmatically; query results
+  also support `--format table|json|csv`.
+- **Read freely, but confirm before writes.** `create`, `update`, `delete`,
+  `revoke`, `approve`, `deploy`, and `assign`/`unassign` change state — show the
+  user what you're about to run and get a yes first.
+- If a command fails with a `403` / missing-scope error, the API key lacks a
+  scope (e.g. `inquiry:execute`, `query:execute`, `connection:read`). Tell the
+  user which scope to add to their key.
+- For the full command surface, run `AL --help` or see the project README.

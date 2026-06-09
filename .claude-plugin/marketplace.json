@@ -1,0 +1,27 @@
+{
+  "name": "answerlayer",
+  "description": "AnswerLayer plugins for Claude Code.",
+  "owner": {
+    "name": "AnswerLayer"
+  },
+  "plugins": [
+    {
+      "name": "answerlayer",
+      "source": {
+        "source": "url",
+        "url": "https://github.com/AnswerLayer/answerlayer-cli.git"
+      },
+      "description": "Query your databases in natural language with AnswerLayer — configure your host + API key, then ask questions, run SQL, and manage the semantic layer and dashboards.",
+      "homepage": "https://github.com/AnswerLayer/answerlayer-cli#readme",
+      "license": "Apache-2.0",
+      "category": "data",
+      "keywords": [
+        "answerlayer",
+        "analytics",
+        "sql",
+        "semantic-layer",
+        "natural-language"
+      ]
+    }
+  ]
+}

@@ -2,10 +2,19 @@
 
 Open-source command line client for the AnswerLayer API.
 
+Use it three ways: as a global command, with `npx`, or as a [Claude Code
+plugin](#use-with-claude-code) that lets Claude configure and drive it for you.
+
 ## Install
 
 ```bash
 npm install -g @answerlayer/cli
+```
+
+Or run it without installing:
+
+```bash
+npx -y @answerlayer/cli --help
 ```
 
 For local development:
@@ -15,6 +24,26 @@ git clone https://github.com/AnswerLayer/answerlayer-cli.git
 cd answerlayer-cli
 npm link
 ```
+
+## Use with Claude Code
+
+This repo is also a Claude Code plugin. Installing it gives Claude the CLI (on
+its PATH, no separate install) plus a skill that configures your host + API key
+and then answers questions against your data.
+
+```text
+/plugin marketplace add AnswerLayer/answerlayer-cli
+/plugin install answerlayer@answerlayer
+```
+
+Then just ask — for example *"set up AnswerLayer and tell me revenue last
+month."* Claude will prompt for your API key (and host, if you're self-hosted),
+run `answerlayer configure`, and start asking questions for you. Your key is
+stored locally in `~/.answerlayer/config.json`; it is never sent anywhere except
+to your AnswerLayer host as the `X-API-Key` header.
+
+The plugin and the standalone CLI are the same tool — installing the plugin does
+not change how `answerlayer` works from your terminal.
 
 ## Configure
 

@@ -1,0 +1,20 @@
+{
+  "name": "answerlayer",
+  "displayName": "AnswerLayer",
+  "description": "Query your databases in natural language with AnswerLayer. Bundles the AnswerLayer CLI and a skill that configures your host + API key and drives inquiries, queries, the semantic layer, and dashboards.",
+  "version": "0.1.0",
+  "author": {
+    "name": "AnswerLayer"
+  },
+  "homepage": "https://github.com/AnswerLayer/answerlayer-cli#readme",
+  "repository": "https://github.com/AnswerLayer/answerlayer-cli",
+  "license": "Apache-2.0",
+  "keywords": [
+    "answerlayer",
+    "analytics",
+    "sql",
+    "semantic-layer",
+    "natural-language",
+    "cli"
+  ]
+}
