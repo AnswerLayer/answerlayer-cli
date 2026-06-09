@@ -23,7 +23,19 @@
     "semantic-layer",
     "sql"
   ],
-  "license": "MIT",
+  "author": "AnswerLayer",
+  "license": "Apache-2.0",
+  "homepage": "https://github.com/AnswerLayer/answerlayer-cli#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/AnswerLayer/answerlayer-cli.git"
+  },
+  "bugs": {
+    "url": "https://github.com/AnswerLayer/answerlayer-cli/issues"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
   "engines": {
     "node": ">=20"
   }

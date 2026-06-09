@@ -30,6 +30,32 @@ test("configure writes base URL and API key to the configured path", async () =>
   assert.match(output.text(), /Saved AnswerLayer config/);
 });
 
+test("defaults the base URL to the hosted SaaS when none is configured", async () => {
+  const originalFetch = globalThis.fetch;
+  const output = captureStream();
+
+  globalThis.fetch = async (url) => {
+    assert.equal(String(url), "https://app.answerlayer.io/api/v1/auth/me");
+    return new Response(JSON.stringify({ email: "user@example.com" }), {
+      status: 200,
+      headers: { "content-type": "application/json" },
+    });
+  };
+
+  try {
+    await main(["auth", "me", "--api-key", "al_live_test"], {
+      env: {},
+      stdin: readableStdin(),
+      stdout: output,
+      stderr: captureStream(),
+    });
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+
+  assert.deepEqual(JSON.parse(output.text()), { email: "user@example.com" });
+});
+
 test("query run calls the AnswerLayer API with X-API-Key", async () => {
   const originalFetch = globalThis.fetch;
   const output = captureStream();
