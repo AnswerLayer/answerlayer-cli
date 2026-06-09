@@ -22,10 +22,10 @@ command -v answerlayer.js >/dev/null && echo answerlayer.js \
 ```
 
 - `answerlayer.js` — ships with this plugin and is on your PATH (works offline).
-- `answerlayer` — a global npm install (`npm i -g @answerlayer/cli`).
+- `answerlayer` — a global install (`npm i -g @answerlayer/cli`).
 - `npx -y @answerlayer/cli` — fallback; downloads from npm on first use.
 
-Use whichever it prints as `AL` below. All three run identical code.
+Use whichever it prints as `AL` below. They all run identical code.
 
 ## 2. Ensure it's configured
 

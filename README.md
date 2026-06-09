@@ -2,8 +2,9 @@
 
 Open-source command line client for the AnswerLayer API.
 
-Use it three ways: as a global command, with `npx`, or as a [Claude Code
-plugin](#use-with-claude-code) that lets Claude configure and drive it for you.
+Use it three ways: as a global command, on demand with `npx`, or as a [Claude
+Code plugin](#use-with-claude-code) that lets Claude configure and drive it for
+you.
 
 ## Install
 
@@ -15,6 +16,13 @@ Or run it without installing:
 
 ```bash
 npx -y @answerlayer/cli --help
+```
+
+The CLI is zero-dependency and runs on Node 20+. It also runs on
+[Bun](https://bun.sh), if you prefer it:
+
+```bash
+bun install -g @answerlayer/cli   # or: bunx @answerlayer/cli --help
 ```
 
 For local development:
