@@ -1,23 +1,31 @@
 name: Release
 
-# Publishes @answerlayer/cli to npm when a GitHub Release is published.
+# On every push to main, semantic-release derives the next version from commit
+# messages, publishes @answerlayer/cli to npm via Trusted Publishing (OIDC — no
+# token), and creates the git tag + GitHub Release. Provenance is automatic.
 #
-# Uses npm Trusted Publishing (OIDC) — no token or secret required. The trusted
-# publisher must be configured once on npmjs.com for @answerlayer/cli:
-# GitHub Actions → AnswerLayer/answerlayer-cli → workflow release.yml.
-# Provenance is attached automatically.
+# Bump policy (scripts/semantic-release-bump.js): everything defaults to a
+# patch; `feat(minor):` -> minor; `type!:` / BREAKING CHANGE -> major.
 on:
-  release:
-    types: [published]
+  push:
+    branches: [main]
+
+concurrency:
+  group: release
+  cancel-in-progress: false
 
 jobs:
-  publish:
+  release:
     runs-on: ubuntu-latest
     permissions:
-      contents: read
-      id-token: write # required for npm Trusted Publishing (OIDC)
+      contents: write # create tags + GitHub Releases
+      issues: write # semantic-release release comments
+      pull-requests: write # semantic-release release comments
+      id-token: write # npm Trusted Publishing (OIDC)
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # semantic-release needs full history + tags
       - uses: actions/setup-node@v4
         with:
           node-version: "22"
@@ -26,13 +34,6 @@ jobs:
       - run: npm install -g npm@11
       - run: npm ci
       - run: npm test
-      # Fail early if the release tag (e.g. v0.1.0) doesn't match package.json.
-      - name: Verify version matches tag
-        run: |
-          PKG_VERSION="$(node -p "require('./package.json').version")"
-          TAG_VERSION="${GITHUB_REF_NAME#v}"
-          if [ "$PKG_VERSION" != "$TAG_VERSION" ]; then
-            echo "package.json version ($PKG_VERSION) does not match release tag ($TAG_VERSION)" >&2
-            exit 1
-          fi
-      - run: npm publish
+      - run: npx --yes semantic-release@24
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
