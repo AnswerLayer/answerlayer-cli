@@ -147,6 +147,16 @@ npm test
 
 The package intentionally has no runtime dependencies. It requires Node.js 20 or newer for built-in `fetch`.
 
+## Releasing
+
+Releases are automated with [semantic-release](https://semantic-release.gitbook.io/).
+Every push to `main` derives the next version from commit messages and publishes
+to npm via OIDC — no manual version bump, tag, or token:
+
+- `fix:` / `feat:` / `chore:` / unprefixed … → patch (`0.0.X`)
+- `feat(minor): …` → minor (`0.X.0`)
+- `type!: …` or `BREAKING CHANGE:` in the body → major (`X.0.0`)
+
 ## Related projects
 
 - [`answerlayer-go`](https://github.com/AnswerLayer/answerlayer-go) — Go client/SDK for the Inquiry API.
