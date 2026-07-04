@@ -49,7 +49,7 @@ function rank(releaseType) {
 export async function analyzeCommits(pluginConfig, context) {
   if (!context.commits || context.commits.length === 0) {
     context.logger.log("No commits since last release; skipping");
-    return false;
+    return null;
   }
 
   return context.commits.reduce((highest, commit) => {
