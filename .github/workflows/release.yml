@@ -23,7 +23,7 @@ jobs:
           node-version: "22"
           registry-url: "https://registry.npmjs.org"
       # Trusted Publishing needs npm >= 11.5.1 (Node 22 ships npm 10).
-      - run: npm install -g npm@latest
+      - run: npm install -g npm@11
       - run: npm ci
       - run: npm test
       # Fail early if the release tag (e.g. v0.1.0) doesn't match package.json.
