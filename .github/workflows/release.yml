@@ -36,6 +36,8 @@ jobs:
       - run: npm test
       # Pinned to an exact version for reproducible release runs. Keeps the
       # package dependency-free (semantic-release is not a devDependency).
-      - run: npx --yes semantic-release@24.2.9
+      # v25 bundles @semantic-release/npm v13, which supports OIDC Trusted
+      # Publishing (v24's bundled v12 still required an NPM_TOKEN).
+      - run: npx --yes semantic-release@25.0.5
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
