@@ -7,7 +7,13 @@ import { AnswerLayerClient } from "./client.js";
 import { readConfig, writeConfig } from "./config.js";
 
 const CORE_REPOSITORY = "https://github.com/AnswerLayer/answerlayer-core.git";
-const LOCAL_BASE_URL = "http://localhost:8000";
+const CORE_REMOTE_PATTERN = /(?:^|@|\/\/)github\.com[:/]AnswerLayer\/answerlayer-core(?:\.git)?\/?$/i;
+const REQUIRED_CORE_PATHS = [
+  "docker-compose.yml",
+  ".env.example",
+  "Makefile",
+  "backend/app/scripts/bootstrap_local.py",
+];
 
 export async function localUp(parsed, io) {
   const stackDir = path.resolve(firstValue(parsed.flags.stackDir) || path.join(os.homedir(), ".answerlayer", "core"));
@@ -28,9 +34,8 @@ export async function localUp(parsed, io) {
     fs.mkdirSync(path.dirname(stackDir), { recursive: true, mode: 0o700 });
     write(io.stdout, `Cloning the AnswerLayer stack into ${stackDir}\n`);
     checked(run, "git", ["clone", "--depth", "1", CORE_REPOSITORY, stackDir]);
-  } else if (!fs.existsSync(path.join(stackDir, ".git")) || !fs.existsSync(path.join(stackDir, "docker-compose.yml"))) {
-    throw new Error(`${stackDir} exists but is not an AnswerLayer core checkout`);
   }
+  validateCheckout(stackDir, run);
 
   if (!fs.existsSync(envPath)) {
     prepareEnvironment(stackDir, io.env.ANTHROPIC_API_KEY);
@@ -39,11 +44,18 @@ export async function localUp(parsed, io) {
 
   write(io.stdout, "Starting the local AnswerLayer stack...\n");
   checked(run, "docker", ["compose", "up", "--build", "-d"], { cwd: stackDir, passthrough: true });
-  await waitUntilHealthy(io);
+  const publishedPort = checked(
+    run,
+    "docker",
+    ["compose", "port", "answerlayer", "8000"],
+    { cwd: stackDir },
+  );
+  const baseUrl = parsePublishedBaseUrl(publishedPort.stdout);
+  await waitUntilHealthy(baseUrl, io);
 
   write(io.stdout, "Creating a local CLI identity and rotating its scoped key...\n");
   const bootstrap = checked(run, "make", ["local-bootstrap"], { cwd: stackDir });
-  const credentials = parseBootstrap(bootstrap.stdout);
+  const credentials = { baseUrl, apiKey: parseBootstrapApiKey(bootstrap.stdout) };
 
   const client = new AnswerLayerClient({ ...credentials, fetchImpl: io.fetch || globalThis.fetch });
   await client.rawRequest("GET", "/api/v1/auth/me");
@@ -60,35 +72,76 @@ function prepareEnvironment(stackDir, anthropicApiKey) {
 
   if (/[\r\n]/.test(anthropicApiKey)) throw new Error("ANTHROPIC_API_KEY must not contain a newline");
   const encryptionKey = crypto.randomBytes(32).toString("hex");
-  const contents = fs.readFileSync(examplePath, "utf8")
-    .replace(/^ANTHROPIC_API_KEY=.*$/m, () => `ANTHROPIC_API_KEY=${anthropicApiKey}`)
-    .replace(/^ENCRYPTION_KEY=.*$/m, () => `ENCRYPTION_KEY=${encryptionKey}`);
+  const template = fs.readFileSync(examplePath, "utf8");
+  const replacements = {
+    ANTHROPIC_API_KEY: anthropicApiKey,
+    ENCRYPTION_KEY: encryptionKey,
+  };
+  let contents = template;
+  for (const [name, value] of Object.entries(replacements)) {
+    const pattern = new RegExp(`^${name}=.*$`, "gm");
+    if ([...template.matchAll(pattern)].length !== 1) {
+      throw new Error(`${examplePath} must contain exactly one ${name}= entry`);
+    }
+    contents = contents.replace(pattern, () => `${name}=${value}`);
+  }
   const envPath = path.join(stackDir, ".env");
   fs.writeFileSync(envPath, contents, { encoding: "utf8", mode: 0o600 });
   fs.chmodSync(envPath, 0o600);
 }
 
-async function waitUntilHealthy(io) {
+function validateCheckout(stackDir, run) {
+  if (!fs.existsSync(path.join(stackDir, ".git"))) {
+    throw new Error(`${stackDir} is not a Git checkout`);
+  }
+  for (const relativePath of REQUIRED_CORE_PATHS) {
+    if (!fs.existsSync(path.join(stackDir, relativePath))) {
+      throw new Error(`${stackDir} is missing required AnswerLayer core file ${relativePath}`);
+    }
+  }
+
+  const remote = checked(run, "git", ["-C", stackDir, "remote", "get-url", "origin"]);
+  if (!CORE_REMOTE_PATTERN.test(String(remote.stdout).trim())) {
+    throw new Error(`${stackDir} does not use the official AnswerLayer core origin`);
+  }
+}
+
+function parsePublishedBaseUrl(stdout) {
+  const publishedAddress = String(stdout)
+    .split(/\r?\n/)
+    .map(line => line.trim())
+    .find(line => /^(?:0\.0\.0\.0|127\.0\.0\.1|localhost|\[::\]):\d+$/.test(line));
+  const port = publishedAddress
+    ? Number.parseInt(publishedAddress.slice(publishedAddress.lastIndexOf(":") + 1), 10)
+    : 0;
+  if (port < 1 || port > 65535) {
+    throw new Error("Docker Compose did not publish answerlayer port 8000 on a local host interface");
+  }
+  return `http://127.0.0.1:${port}`;
+}
+
+async function waitUntilHealthy(baseUrl, io) {
   const fetchImpl = io.fetch || globalThis.fetch;
   const sleep = io.sleep || ((milliseconds) => new Promise(resolve => setTimeout(resolve, milliseconds)));
   const attempts = io.healthAttempts || 60;
 
   for (let attempt = 0; attempt < attempts; attempt += 1) {
     try {
-      const response = await fetchImpl(`${LOCAL_BASE_URL}/healthz`);
+      const response = await fetchImpl(`${baseUrl}/healthz`);
       if (response.ok) return;
     } catch {
       // The container may still be starting.
     }
     await sleep(2000);
   }
-  throw new Error(`Local stack did not become healthy at ${LOCAL_BASE_URL}/healthz`);
+  throw new Error(`Local stack did not become healthy at ${baseUrl}/healthz`);
 }
 
-function parseBootstrap(stdout) {
-  const match = stdout.match(/answerlayer init --base-url (\S+) --api-key (\S+)/);
+function parseBootstrapApiKey(stdout) {
+  const initLine = String(stdout).split(/\r?\n/).find(line => /(?:^|\s)answerlayer\s+init(?:\s|$)/.test(line));
+  const match = initLine?.match(/(?:^|\s)--api-key(?:=|\s+)(\S+)/);
   if (!match) throw new Error("Local bootstrap completed without returning CLI credentials");
-  return { baseUrl: match[1], apiKey: match[2] };
+  return match[1];
 }
 
 function requireCommand(run, command, args) {

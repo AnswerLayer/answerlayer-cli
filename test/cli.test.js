@@ -158,16 +158,25 @@ test("local up clones, starts, bootstraps, verifies, and configures the local st
     commands.push([command, args, options]);
     if (command === "git" && args[0] === "clone") {
       fs.mkdirSync(path.join(stackDir, ".git"), { recursive: true });
+      fs.mkdirSync(path.join(stackDir, "backend/app/scripts"), { recursive: true });
       fs.writeFileSync(path.join(stackDir, "docker-compose.yml"), "services: {}\n");
+      fs.writeFileSync(path.join(stackDir, "Makefile"), "local-bootstrap:\n\t@true\n");
+      fs.writeFileSync(path.join(stackDir, "backend/app/scripts/bootstrap_local.py"), "# local bootstrap\n");
       fs.writeFileSync(
         path.join(stackDir, ".env.example"),
         "ANTHROPIC_API_KEY=placeholder\nENCRYPTION_KEY=placeholder\n",
       );
     }
+    if (command === "git" && args.includes("get-url")) {
+      return { status: 0, stdout: "git@github.com:AnswerLayer/answerlayer-core.git\n", stderr: "" };
+    }
+    if (command === "docker" && args.includes("port")) {
+      return { status: 0, stdout: "0.0.0.0:49152\n", stderr: "" };
+    }
     if (command === "make") {
       return {
         status: 0,
-        stdout: "answerlayer init --base-url http://localhost:8000 --api-key al_local_secret\n",
+        stdout: "answerlayer init --api-key al_local_secret --base-url http://localhost:8000\n",
         stderr: "",
       };
     }
@@ -176,7 +185,7 @@ test("local up clones, starts, bootstraps, verifies, and configures the local st
 
   const fetchImpl = async (url, init = {}) => {
     if (String(url).endsWith("/healthz")) return new Response("ok");
-    assert.equal(String(url), "http://localhost:8000/api/v1/auth/me");
+    assert.equal(String(url), "http://127.0.0.1:49152/api/v1/auth/me");
     assert.equal(init.headers["X-API-Key"], "al_local_secret");
     return new Response(JSON.stringify({ email: "local@answerlayer.test" }), {
       headers: { "content-type": "application/json" },
@@ -197,11 +206,13 @@ test("local up clones, starts, bootstraps, verifies, and configures the local st
     ["git", "--version"],
     ["docker", "compose", "version"],
     ["git", "clone", "--depth", "1", "https://github.com/AnswerLayer/answerlayer-core.git", stackDir],
+    ["git", "-C", stackDir, "remote", "get-url", "origin"],
     ["docker", "compose", "up", "--build", "-d"],
+    ["docker", "compose", "port", "answerlayer", "8000"],
     ["make", "local-bootstrap"],
   ]);
   assert.deepEqual(JSON.parse(fs.readFileSync(configPath, "utf8")), {
-    baseUrl: "http://localhost:8000",
+    baseUrl: "http://127.0.0.1:49152",
     apiKey: "al_local_secret",
   });
   assert.equal(fs.statSync(path.join(stackDir, ".env")).mode & 0o777, 0o600);
@@ -231,6 +242,50 @@ test("local up requires the provider key before creating a new checkout", async 
 
   assert.equal(fs.existsSync(stackDir), false);
   assert.deepEqual(commands, [["git", "--version"], ["docker", "compose", "version"]]);
+});
+
+test("local up rejects an existing checkout with a non-AnswerLayer origin", async () => {
+  const stackDir = createCoreCheckout();
+  fs.writeFileSync(path.join(stackDir, ".env"), "ANTHROPIC_API_KEY=local\n");
+
+  await assert.rejects(
+    main(["local", "up", "--stack-dir", stackDir], {
+      env: {},
+      stdin: readableStdin(),
+      stdout: captureStream(),
+      stderr: captureStream(),
+      runCommand(command, args) {
+        if (command === "git" && args.includes("get-url")) {
+          return { status: 0, stdout: "https://github.com/example/another-repo.git\n", stderr: "" };
+        }
+        return { status: 0, stdout: "", stderr: "" };
+      },
+    }),
+    /does not use the official AnswerLayer core origin/,
+  );
+});
+
+test("local up refuses to create an environment from an incompatible template", async () => {
+  const stackDir = createCoreCheckout();
+  fs.writeFileSync(path.join(stackDir, ".env.example"), "ANTHROPIC_API_KEY=placeholder\n");
+
+  await assert.rejects(
+    main(["local", "up", "--stack-dir", stackDir], {
+      env: { ANTHROPIC_API_KEY: "sk-ant-local" },
+      stdin: readableStdin(),
+      stdout: captureStream(),
+      stderr: captureStream(),
+      runCommand(command, args) {
+        if (command === "git" && args.includes("get-url")) {
+          return { status: 0, stdout: "https://github.com/AnswerLayer/answerlayer-core.git\n", stderr: "" };
+        }
+        return { status: 0, stdout: "", stderr: "" };
+      },
+    }),
+    /must contain exactly one ENCRYPTION_KEY= entry/,
+  );
+
+  assert.equal(fs.existsSync(path.join(stackDir, ".env")), false);
 });
 
 test("defaults the base URL to the hosted SaaS when none is configured", async () => {
@@ -418,6 +473,17 @@ function readableStdin() {
   const stream = Readable.from([]);
   stream.isTTY = true;
   return stream;
+}
+
+function createCoreCheckout() {
+  const stackDir = fs.mkdtempSync(path.join(os.tmpdir(), "al-cli-core-"));
+  fs.mkdirSync(path.join(stackDir, ".git"));
+  fs.mkdirSync(path.join(stackDir, "backend/app/scripts"), { recursive: true });
+  fs.writeFileSync(path.join(stackDir, "docker-compose.yml"), "services: {}\n");
+  fs.writeFileSync(path.join(stackDir, ".env.example"), "ANTHROPIC_API_KEY=x\nENCRYPTION_KEY=x\n");
+  fs.writeFileSync(path.join(stackDir, "Makefile"), "local-bootstrap:\n\t@true\n");
+  fs.writeFileSync(path.join(stackDir, "backend/app/scripts/bootstrap_local.py"), "# local bootstrap\n");
+  return stackDir;
 }
 
 function captureStream() {
