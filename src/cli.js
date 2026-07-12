@@ -104,11 +104,12 @@ function installSkill(command, parsed, io) {
 
 async function initialize(parsed, io) {
   const existing = readConfig(io.env);
-  const { baseUrl, apiKey } = resolveAuth(parsed.flags, io.env);
+  const { baseUrl } = resolveAuth(parsed.flags, io.env);
+  const apiKey = firstValue(parsed.flags.apiKey);
 
   if (!apiKey) {
     throw usage(
-      "init requires an API key. Create one in AnswerLayer under Settings → API Keys, then run `answerlayer init --api-key <key>`.",
+      "init requires an explicit --api-key. Use the command printed by `make local-bootstrap`, or create a key under Settings → API Keys.",
     );
   }
 

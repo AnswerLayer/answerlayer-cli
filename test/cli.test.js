@@ -129,6 +129,24 @@ test("init leaves an existing configuration untouched when key verification fail
   assert.deepEqual(JSON.parse(fs.readFileSync(configPath, "utf8")), originalConfig);
 });
 
+test("init requires an explicit API key instead of reusing saved credentials", async () => {
+  const configPath = path.join(fs.mkdtempSync(path.join(os.tmpdir(), "al-cli-init-")), "config.json");
+  const originalConfig = { baseUrl: "https://working.example", apiKey: "al_live_working" };
+  fs.writeFileSync(configPath, `${JSON.stringify(originalConfig)}\n`);
+
+  await assert.rejects(
+    main(["init"], {
+      env: { ANSWERLAYER_CONFIG: configPath },
+      stdin: readableStdin(),
+      stdout: captureStream(),
+      stderr: captureStream(),
+    }),
+    /requires an explicit --api-key/,
+  );
+
+  assert.deepEqual(JSON.parse(fs.readFileSync(configPath, "utf8")), originalConfig);
+});
+
 test("defaults the base URL to the hosted SaaS when none is configured", async () => {
   const originalFetch = globalThis.fetch;
   const output = captureStream();
