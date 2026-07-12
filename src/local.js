@@ -110,7 +110,7 @@ function parsePublishedBaseUrl(stdout) {
   const publishedAddress = String(stdout)
     .split(/\r?\n/)
     .map(line => line.trim())
-    .find(line => /^(?:0\.0\.0\.0|127\.0\.0\.1|localhost|\[::\]):\d+$/.test(line));
+    .find(line => /^(?:0\.0\.0\.0|127\.0\.0\.1|localhost|\[::\]|::):\d+$/.test(line));
   const port = publishedAddress
     ? Number.parseInt(publishedAddress.slice(publishedAddress.lastIndexOf(":") + 1), 10)
     : 0;

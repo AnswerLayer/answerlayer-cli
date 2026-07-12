@@ -171,7 +171,7 @@ test("local up clones, starts, bootstraps, verifies, and configures the local st
       return { status: 0, stdout: "git@github.com:AnswerLayer/answerlayer-core.git\n", stderr: "" };
     }
     if (command === "docker" && args.includes("port")) {
-      return { status: 0, stdout: "0.0.0.0:49152\n", stderr: "" };
+      return { status: 0, stdout: ":::49152\n", stderr: "" };
     }
     if (command === "make") {
       return {
