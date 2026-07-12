@@ -1,5 +1,7 @@
 import fs from "node:fs";
+import os from "node:os";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 import { AnswerLayerClient } from "./client.js";
 import { formatJson, formatList, formatQueryResult } from "./format.js";
 import { DEFAULT_BASE_URL, readConfig, resolveAuth, writeConfig } from "./config.js";
@@ -24,6 +26,10 @@ export async function main(argv, io) {
 
   if (group === "configure") {
     return configure(parsed, io);
+  }
+
+  if (group === "skills") {
+    return installSkill(command, parsed, io);
   }
 
   const { baseUrl, apiKey } = resolveAuth(parsed.flags, io.env);
@@ -67,6 +73,29 @@ function configure(parsed, io) {
 
   const configPath = writeConfig({ ...existing, baseUrl, apiKey }, io.env);
   write(io.stdout, `Saved AnswerLayer config to ${configPath}\n`);
+}
+
+function installSkill(command, parsed, io) {
+  if (command !== "install") {
+    throw usage("Expected `answerlayer skills install`");
+  }
+
+  const source = path.resolve(
+    path.dirname(fileURLToPath(import.meta.url)),
+    "../skills/answerlayer",
+  );
+  const codexHome = io.env.CODEX_HOME || path.join(os.homedir(), ".codex");
+  const target = firstValue(parsed.flags.path) || path.join(codexHome, "skills", "answerlayer");
+
+  if (fs.existsSync(target) && !parsed.flags.force) {
+    throw usage(
+      `Skill already exists at ${target}. Review it, then rerun with --force to replace it.`,
+    );
+  }
+
+  fs.mkdirSync(path.dirname(target), { recursive: true, mode: 0o700 });
+  fs.cpSync(source, target, { recursive: true, force: true });
+  write(io.stdout, `Installed AnswerLayer skill to ${target}\n`);
 }
 
 async function handleHealth(client, command, parsed, io) {
@@ -1196,7 +1225,7 @@ function normalizeFlagName(rawName) {
 }
 
 function isBooleanFlag(rawName) {
-  return ["--json", "--help", "-h", "--include", "-i", "--raw", "--admin"].includes(rawName);
+  return ["--json", "--help", "-h", "--include", "-i", "--raw", "--admin", "--force"].includes(rawName);
 }
 
 function setFlag(flags, name, value) {
@@ -1282,6 +1311,7 @@ function helpText() {
   return `AnswerLayer CLI
 
 Usage:
+  answerlayer skills install [--path <directory>] [--force]
   answerlayer configure --base-url <url> --api-key <key>
   answerlayer health
   answerlayer openapi --output openapi.json

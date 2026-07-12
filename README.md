@@ -77,6 +77,35 @@ export ANSWERLAYER_BASE_URL=https://answerlayer.your-company.com  # optional ove
 
 The CLI sends API keys using the `X-API-Key` header.
 
+## Run locally with an agent
+
+The package includes an `answerlayer` agent skill for evaluating AnswerLayer
+against your own database without first creating a hosted account. Install it
+for Codex with:
+
+```bash
+answerlayer skills install
+```
+
+This installs to `~/.codex/skills/answerlayer` by default. Use `--path` for a
+different skill directory; an existing skill is never replaced unless you pass
+`--force`.
+
+The flow is:
+
+1. Install the CLI/plugin.
+2. Clone and start the local `answerlayer-core` Docker stack.
+3. Run `make local-bootstrap` in that stack to create a local-only organization
+   and scoped CLI key.
+4. Configure the CLI for `http://localhost:8000` with the printed command.
+5. Connect a dedicated, read-only database user and test a small, approved
+   schema first.
+
+The local stack never needs a hosted AnswerLayer account. The skill requires
+agent confirmation before it starts containers, creates a connection, or sends
+queries to a real database, and it instructs agents not to print or persist
+database passwords.
+
 Useful scopes:
 
 - `api_key:manage` for API key management

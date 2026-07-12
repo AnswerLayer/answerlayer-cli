@@ -30,6 +30,37 @@ test("configure writes base URL and API key to the configured path", async () =>
   assert.match(output.text(), /Saved AnswerLayer config/);
 });
 
+test("skills install copies the bundled AnswerLayer skill without credentials", async () => {
+  const target = path.join(fs.mkdtempSync(path.join(os.tmpdir(), "al-cli-skill-")), "answerlayer");
+  const output = captureStream();
+
+  await main(["skills", "install", "--path", target], {
+    env: {},
+    stdin: readableStdin(),
+    stdout: output,
+    stderr: captureStream(),
+  });
+
+  assert.ok(fs.existsSync(path.join(target, "SKILL.md")));
+  assert.match(fs.readFileSync(path.join(target, "SKILL.md"), "utf8"), /Local stack workflow/);
+  assert.match(output.text(), /Installed AnswerLayer skill/);
+});
+
+test("skills install requires --force to replace an existing skill", async () => {
+  const target = path.join(fs.mkdtempSync(path.join(os.tmpdir(), "al-cli-skill-")), "answerlayer");
+  fs.mkdirSync(target);
+
+  await assert.rejects(
+    main(["skills", "install", "--path", target], {
+      env: {},
+      stdin: readableStdin(),
+      stdout: captureStream(),
+      stderr: captureStream(),
+    }),
+    /rerun with --force/,
+  );
+});
+
 test("defaults the base URL to the hosted SaaS when none is configured", async () => {
   const originalFetch = globalThis.fetch;
   const output = captureStream();
