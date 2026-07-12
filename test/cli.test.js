@@ -147,6 +147,92 @@ test("init requires an explicit API key instead of reusing saved credentials", a
   assert.deepEqual(JSON.parse(fs.readFileSync(configPath, "utf8")), originalConfig);
 });
 
+test("local up clones, starts, bootstraps, verifies, and configures the local stack", async () => {
+  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "al-cli-local-"));
+  const stackDir = path.join(tempDir, "core");
+  const configPath = path.join(tempDir, "config.json");
+  const commands = [];
+  const output = captureStream();
+
+  const runCommand = (command, args, options) => {
+    commands.push([command, args, options]);
+    if (command === "git" && args[0] === "clone") {
+      fs.mkdirSync(path.join(stackDir, ".git"), { recursive: true });
+      fs.writeFileSync(path.join(stackDir, "docker-compose.yml"), "services: {}\n");
+      fs.writeFileSync(
+        path.join(stackDir, ".env.example"),
+        "ANTHROPIC_API_KEY=placeholder\nENCRYPTION_KEY=placeholder\n",
+      );
+    }
+    if (command === "make") {
+      return {
+        status: 0,
+        stdout: "answerlayer init --base-url http://localhost:8000 --api-key al_local_secret\n",
+        stderr: "",
+      };
+    }
+    return { status: 0, stdout: "", stderr: "" };
+  };
+
+  const fetchImpl = async (url, init = {}) => {
+    if (String(url).endsWith("/healthz")) return new Response("ok");
+    assert.equal(String(url), "http://localhost:8000/api/v1/auth/me");
+    assert.equal(init.headers["X-API-Key"], "al_local_secret");
+    return new Response(JSON.stringify({ email: "local@answerlayer.test" }), {
+      headers: { "content-type": "application/json" },
+    });
+  };
+
+  await main(["local", "up", "--stack-dir", stackDir], {
+    env: { ANTHROPIC_API_KEY: "sk-ant-local", ANSWERLAYER_CONFIG: configPath },
+    stdin: readableStdin(),
+    stdout: output,
+    stderr: captureStream(),
+    runCommand,
+    fetch: fetchImpl,
+    sleep: async () => {},
+  });
+
+  assert.deepEqual(commands.map(([command, args]) => [command, ...args]), [
+    ["git", "--version"],
+    ["docker", "compose", "version"],
+    ["git", "clone", "--depth", "1", "https://github.com/AnswerLayer/answerlayer-core.git", stackDir],
+    ["docker", "compose", "up", "--build", "-d"],
+    ["make", "local-bootstrap"],
+  ]);
+  assert.deepEqual(JSON.parse(fs.readFileSync(configPath, "utf8")), {
+    baseUrl: "http://localhost:8000",
+    apiKey: "al_local_secret",
+  });
+  assert.equal(fs.statSync(path.join(stackDir, ".env")).mode & 0o777, 0o600);
+  assert.match(fs.readFileSync(path.join(stackDir, ".env"), "utf8"), /ANTHROPIC_API_KEY=sk-ant-local/);
+  assert.doesNotMatch(output.text(), /al_local_secret/);
+  assert.match(output.text(), /Local AnswerLayer is ready/);
+});
+
+test("local up requires the provider key before creating a new checkout", async () => {
+  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "al-cli-local-"));
+  const stackDir = path.join(tempDir, "core");
+  const commands = [];
+
+  await assert.rejects(
+    main(["local", "up", "--stack-dir", stackDir], {
+      env: {},
+      stdin: readableStdin(),
+      stdout: captureStream(),
+      stderr: captureStream(),
+      runCommand(command, args) {
+        commands.push([command, ...args]);
+        return { status: 0, stdout: "", stderr: "" };
+      },
+    }),
+    /Set ANTHROPIC_API_KEY/,
+  );
+
+  assert.equal(fs.existsSync(stackDir), false);
+  assert.deepEqual(commands, [["git", "--version"], ["docker", "compose", "version"]]);
+});
+
 test("defaults the base URL to the hosted SaaS when none is configured", async () => {
   const originalFetch = globalThis.fetch;
   const output = captureStream();

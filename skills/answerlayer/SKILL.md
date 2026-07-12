@@ -30,44 +30,34 @@ already available in the Codex skills directory.
    npm install -g @answerlayer/cli
    ```
 
-2. Clone the core stack beside the user's work and prepare its environment:
+2. Ask the user to set their Anthropic key privately in their own terminal. Do
+   not ask them to paste it into chat or put it in shell history:
 
    ```bash
-   git clone https://github.com/AnswerLayer/answerlayer-core.git
-   cd answerlayer-core
-   cp .env.example .env
+   read -s ANTHROPIC_API_KEY && export ANTHROPIC_API_KEY
    ```
 
-   Ask the user to supply a real `ANTHROPIC_API_KEY` and a strong local
-   `ENCRYPTION_KEY` in `.env`. Do not print, echo, or add either value to a
-   command transcript. Clerk and Stripe placeholders are not needed for the
-   local API-key workflow.
-
-3. After confirmation, start the local stack and wait for its health endpoint:
+3. After confirmation, run the complete local setup:
 
    ```bash
-   docker compose up --build -d
-   curl --fail http://localhost:8000/healthz
+   answerlayer local up
    ```
 
-4. After confirmation, create the local-only organization and CLI key:
+   This verifies Git and Docker, clones the core stack to
+   `~/.answerlayer/core` when needed, creates a permission-restricted `.env`
+   with a generated encryption key, starts Docker Compose, waits for health,
+   creates the local identity and scoped key, verifies it, and configures the
+   CLI. It captures the one-time key rather than printing it. Use
+   `--stack-dir <directory>` to reuse a different core checkout; when that
+   checkout already has a `.env`, `ANTHROPIC_API_KEY` need not be exported.
 
-   ```bash
-   make local-bootstrap
-   ```
-
-   The command rotates any previous `local-cli-bootstrap` key and prints an
-   `answerlayer init --base-url http://localhost:8000 --api-key ...` command.
-   Have the user run that printed command in their terminal. Never copy the key
-   into chat, source control, logs, or a shell command you display back to them.
-
-5. Before connecting real data, require a dedicated database account that is
+4. Before connecting real data, require a dedicated database account that is
    restricted to approved schemas and `SELECT` only. Show the proposed
    connection host, database, and username, then get confirmation before
    running `connections create` or any query. Put the password only in a local,
    permission-restricted JSON file; never print it or commit it.
 
-6. Start with a small approved schema and read-only inspection. Confirm before
+5. Start with a small approved schema and read-only inspection. Confirm before
    creating connections, generating semantic objects, or executing queries.
 
 This workflow is for Docker Compose development only. Do not run
