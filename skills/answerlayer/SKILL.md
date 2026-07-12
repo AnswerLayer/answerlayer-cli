@@ -107,14 +107,15 @@ AL auth me --json
   2. Configure (omit `--base-url` to accept the default):
 
      ```bash
-     AL configure --api-key <KEY> [--base-url https://answerlayer.their-host.com]
+     AL init --api-key <KEY> [--base-url https://answerlayer.their-host.com]
      ```
 
-     This writes `~/.answerlayer/config.json` (mode 0600). Alternatively the user
-     can export `ANSWERLAYER_API_KEY` (and optionally `ANSWERLAYER_BASE_URL`).
+     This verifies the key before writing `~/.answerlayer/config.json` (mode
+     0600). Alternatively the user can export `ANSWERLAYER_API_KEY` (and
+     optionally `ANSWERLAYER_BASE_URL`).
   3. Re-run `AL auth me --json` to confirm.
 
-**Never print, echo, or log the API key.** Pass it straight to `configure`. Tell
+**Never print, echo, or log the API key.** Pass it straight to `init`. Tell
 the user keys are created in the AnswerLayer dashboard under **Settings → API
 Keys** and are shown only once.
 

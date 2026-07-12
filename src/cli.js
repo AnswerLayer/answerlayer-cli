@@ -32,6 +32,10 @@ export async function main(argv, io) {
     return installSkill(command, parsed, io);
   }
 
+  if (group === "init") {
+    return initialize(parsed, io);
+  }
+
   const { baseUrl, apiKey } = resolveAuth(parsed.flags, io.env);
   const client = new AnswerLayerClient({ baseUrl, apiKey });
 
@@ -96,6 +100,26 @@ function installSkill(command, parsed, io) {
   fs.mkdirSync(path.dirname(target), { recursive: true, mode: 0o700 });
   fs.cpSync(source, target, { recursive: true, force: true });
   write(io.stdout, `Installed AnswerLayer skill to ${target}\n`);
+}
+
+async function initialize(parsed, io) {
+  const existing = readConfig(io.env);
+  const { baseUrl, apiKey } = resolveAuth(parsed.flags, io.env);
+
+  if (!apiKey) {
+    throw usage(
+      "init requires an API key. Create one in AnswerLayer under Settings → API Keys, then run `answerlayer init --api-key <key>`.",
+    );
+  }
+
+  // Verify before writing so a typo or an expired key never replaces a working
+  // local configuration.
+  const client = new AnswerLayerClient({ baseUrl, apiKey });
+  await client.rawRequest("GET", "/api/v1/auth/me");
+
+  const configPath = writeConfig({ ...existing, baseUrl, apiKey }, io.env);
+  write(io.stdout, `Verified API key and saved AnswerLayer config to ${configPath}\n`);
+  write(io.stdout, "Next: answerlayer connections list\n");
 }
 
 async function handleHealth(client, command, parsed, io) {
@@ -1312,6 +1336,7 @@ function helpText() {
 
 Usage:
   answerlayer skills install [--path <directory>] [--force]
+  answerlayer init --api-key <key> [--base-url <url>]
   answerlayer configure --base-url <url> --api-key <key>
   answerlayer health
   answerlayer openapi --output openapi.json

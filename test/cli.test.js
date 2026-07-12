@@ -61,6 +61,74 @@ test("skills install requires --force to replace an existing skill", async () =>
   );
 });
 
+test("init verifies an API key before saving the configuration", async () => {
+  const originalFetch = globalThis.fetch;
+  const configPath = path.join(fs.mkdtempSync(path.join(os.tmpdir(), "al-cli-init-")), "config.json");
+  const output = captureStream();
+
+  globalThis.fetch = async (url, init) => {
+    assert.equal(String(url), "https://answerlayer.example/api/v1/auth/me");
+    assert.equal(init.method, "GET");
+    assert.equal(init.headers["X-API-Key"], "al_live_test");
+    return new Response(JSON.stringify({ email: "user@example.com" }), {
+      status: 200,
+      headers: { "content-type": "application/json" },
+    });
+  };
+
+  try {
+    await main([
+      "init",
+      "--base-url",
+      "https://answerlayer.example",
+      "--api-key",
+      "al_live_test",
+    ], {
+      env: { ANSWERLAYER_CONFIG: configPath },
+      stdin: readableStdin(),
+      stdout: output,
+      stderr: captureStream(),
+    });
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+
+  assert.deepEqual(JSON.parse(fs.readFileSync(configPath, "utf8")), {
+    baseUrl: "https://answerlayer.example",
+    apiKey: "al_live_test",
+  });
+  assert.match(output.text(), /Verified API key/);
+  assert.match(output.text(), /answerlayer connections list/);
+});
+
+test("init leaves an existing configuration untouched when key verification fails", async () => {
+  const originalFetch = globalThis.fetch;
+  const configPath = path.join(fs.mkdtempSync(path.join(os.tmpdir(), "al-cli-init-")), "config.json");
+  const originalConfig = { baseUrl: "https://working.example", apiKey: "al_live_working" };
+  fs.writeFileSync(configPath, `${JSON.stringify(originalConfig)}\n`);
+
+  globalThis.fetch = async () => new Response(JSON.stringify({ detail: "Invalid API key" }), {
+    status: 401,
+    headers: { "content-type": "application/json" },
+  });
+
+  try {
+    await assert.rejects(
+      main(["init", "--api-key", "al_live_bad"], {
+        env: { ANSWERLAYER_CONFIG: configPath },
+        stdin: readableStdin(),
+        stdout: captureStream(),
+        stderr: captureStream(),
+      }),
+      /Invalid API key/,
+    );
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+
+  assert.deepEqual(JSON.parse(fs.readFileSync(configPath, "utf8")), originalConfig);
+});
+
 test("defaults the base URL to the hosted SaaS when none is configured", async () => {
   const originalFetch = globalThis.fetch;
   const output = captureStream();

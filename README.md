@@ -55,18 +55,24 @@ not change how `answerlayer` works from your terminal.
 
 ## Configure
 
-Create an API key in AnswerLayer with the scopes needed by your workflow, then run:
+Create an API key in AnswerLayer with the scopes needed by your workflow, then
+initialize the CLI. `init` verifies the key before it writes the config file, so
+an invalid or expired key never overwrites a working local setup:
 
 ```bash
-answerlayer configure --api-key al_live_...
+answerlayer init --api-key al_live_...
 ```
 
 The CLI talks to the hosted SaaS at `https://app.answerlayer.io` by default. For a
 BYOC or self-hosted install, point it at your own URL:
 
 ```bash
-answerlayer configure --api-key al_live_... --base-url https://answerlayer.your-company.com
+answerlayer init --api-key al_live_... --base-url https://answerlayer.your-company.com
 ```
+
+The first API key is currently created in the AnswerLayer app under **Settings →
+API Keys**. A browser/device login flow is planned; until then, the CLI will tell
+you exactly what credential is missing rather than saving an unverified value.
 
 You can also skip the config file and use environment variables:
 
