@@ -11,6 +11,68 @@ the AnswerLayer API with an API key.
 
 Work in three steps: **resolve the CLI → ensure it's configured → use it.**
 
+When a user asks to evaluate AnswerLayer locally or against a real database
+without creating a hosted account, use the local-stack workflow below instead
+of the hosted-key workflow.
+
+## Local stack workflow
+
+Use this only when the user explicitly wants a local evaluation or authorizes
+you to start Docker containers and create a local API key. Explain the commands
+that will run and get confirmation before each state-changing phase.
+
+Install this bundled skill with `answerlayer skills install` when it is not
+already available in the Codex skills directory.
+
+1. Install the CLI if it is not already available:
+
+   ```bash
+   npm install -g @answerlayer/cli
+   ```
+
+2. Clone the core stack beside the user's work and prepare its environment:
+
+   ```bash
+   git clone https://github.com/AnswerLayer/answerlayer-core.git
+   cd answerlayer-core
+   cp .env.example .env
+   ```
+
+   Ask the user to supply a real `ANTHROPIC_API_KEY` and a strong local
+   `ENCRYPTION_KEY` in `.env`. Do not print, echo, or add either value to a
+   command transcript. Clerk and Stripe placeholders are not needed for the
+   local API-key workflow.
+
+3. After confirmation, start the local stack and wait for its health endpoint:
+
+   ```bash
+   docker compose up --build -d
+   curl --fail http://localhost:8000/healthz
+   ```
+
+4. After confirmation, create the local-only organization and CLI key:
+
+   ```bash
+   make local-bootstrap
+   ```
+
+   The command rotates any previous `local-cli-bootstrap` key and prints an
+   `answerlayer init --base-url http://localhost:8000 --api-key ...` command.
+   Have the user run that printed command in their terminal. Never copy the key
+   into chat, source control, logs, or a shell command you display back to them.
+
+5. Before connecting real data, require a dedicated database account that is
+   restricted to approved schemas and `SELECT` only. Show the proposed
+   connection host, database, and username, then get confirmation before
+   running `connections create` or any query. Put the password only in a local,
+   permission-restricted JSON file; never print it or commit it.
+
+6. Start with a small approved schema and read-only inspection. Confirm before
+   creating connections, generating semantic objects, or executing queries.
+
+This workflow is for Docker Compose development only. Do not run
+`local-bootstrap` against a hosted or customer deployment.
+
 ## 1. Resolve the CLI command (`AL`)
 
 Pick the command once per session and reuse it. Run:
@@ -45,14 +107,15 @@ AL auth me --json
   2. Configure (omit `--base-url` to accept the default):
 
      ```bash
-     AL configure --api-key <KEY> [--base-url https://answerlayer.their-host.com]
+     AL init --api-key <KEY> [--base-url https://answerlayer.their-host.com]
      ```
 
-     This writes `~/.answerlayer/config.json` (mode 0600). Alternatively the user
-     can export `ANSWERLAYER_API_KEY` (and optionally `ANSWERLAYER_BASE_URL`).
+     This verifies the key before writing `~/.answerlayer/config.json` (mode
+     0600). Alternatively the user can export `ANSWERLAYER_API_KEY` (and
+     optionally `ANSWERLAYER_BASE_URL`).
   3. Re-run `AL auth me --json` to confirm.
 
-**Never print, echo, or log the API key.** Pass it straight to `configure`. Tell
+**Never print, echo, or log the API key.** Pass it straight to `init`. Tell
 the user keys are created in the AnswerLayer dashboard under **Settings → API
 Keys** and are shown only once.
 

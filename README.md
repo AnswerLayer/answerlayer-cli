@@ -55,18 +55,24 @@ not change how `answerlayer` works from your terminal.
 
 ## Configure
 
-Create an API key in AnswerLayer with the scopes needed by your workflow, then run:
+Create an API key in AnswerLayer with the scopes needed by your workflow, then
+initialize the CLI. `init` verifies the key before it writes the config file, so
+an invalid or expired key never overwrites a working local setup:
 
 ```bash
-answerlayer configure --api-key al_live_...
+answerlayer init --api-key al_live_...
 ```
 
 The CLI talks to the hosted SaaS at `https://app.answerlayer.io` by default. For a
 BYOC or self-hosted install, point it at your own URL:
 
 ```bash
-answerlayer configure --api-key al_live_... --base-url https://answerlayer.your-company.com
+answerlayer init --api-key al_live_... --base-url https://answerlayer.your-company.com
 ```
+
+The first API key is currently created in the AnswerLayer app under **Settings →
+API Keys**. A browser/device login flow is planned; until then, the CLI will tell
+you exactly what credential is missing rather than saving an unverified value.
 
 You can also skip the config file and use environment variables:
 
@@ -76,6 +82,35 @@ export ANSWERLAYER_BASE_URL=https://answerlayer.your-company.com  # optional ove
 ```
 
 The CLI sends API keys using the `X-API-Key` header.
+
+## Run locally with an agent
+
+The package includes an `answerlayer` agent skill for evaluating AnswerLayer
+against your own database without first creating a hosted account. Install it
+for Codex with:
+
+```bash
+answerlayer skills install
+```
+
+This installs to `~/.codex/skills/answerlayer` by default. Use `--path` for a
+different skill directory; an existing skill is never replaced unless you pass
+`--force`.
+
+The flow is:
+
+1. Install the CLI/plugin.
+2. Clone and start the local `answerlayer-core` Docker stack.
+3. Run `make local-bootstrap` in that stack to create a local-only organization
+   and scoped CLI key.
+4. Configure the CLI for `http://localhost:8000` with the printed command.
+5. Connect a dedicated, read-only database user and test a small, approved
+   schema first.
+
+The local stack never needs a hosted AnswerLayer account. The skill requires
+agent confirmation before it starts containers, creates a connection, or sends
+queries to a real database, and it instructs agents not to print or persist
+database passwords.
 
 Useful scopes:
 
