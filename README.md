@@ -97,15 +97,25 @@ This installs to `~/.codex/skills/answerlayer` by default. Use `--path` for a
 different skill directory; an existing skill is never replaced unless you pass
 `--force`.
 
-The flow is:
+Set the model-provider key privately, then let the CLI prepare the stack and
+configure itself:
 
-1. Install the CLI/plugin.
-2. Clone and start the local `answerlayer-core` Docker stack.
-3. Run `make local-bootstrap` in that stack to create a local-only organization
-   and scoped CLI key.
-4. Configure the CLI for `http://localhost:8000` with the printed command.
-5. Connect a dedicated, read-only database user and test a small, approved
-   schema first.
+```bash
+read -s ANTHROPIC_API_KEY && export ANTHROPIC_API_KEY
+answerlayer local up
+```
+
+Use `--stack-dir <directory>` to reuse a different core checkout. If that
+checkout already has a `.env`, the provider key does not need to be exported.
+The command:
+
+1. Verifies Git and Docker and clones `answerlayer-core` when needed.
+2. Creates a permission-restricted `.env` and generates its encryption key.
+3. Starts Docker Compose and waits for the API to become healthy.
+4. Creates a local-only organization and scoped key, verifies the key, and
+   saves the CLI configuration without printing the key.
+5. Leaves you ready to connect a dedicated, read-only database user and test a
+   small, approved schema first.
 
 The local stack never needs a hosted AnswerLayer account. The skill requires
 agent confirmation before it starts containers, creates a connection, or sends
@@ -127,6 +137,7 @@ Useful scopes:
 ```bash
 answerlayer health
 answerlayer openapi --output openapi.json
+answerlayer local up
 
 answerlayer connections list
 answerlayer connections get <connection-id>

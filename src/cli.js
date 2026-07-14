@@ -5,6 +5,7 @@ import { fileURLToPath } from "node:url";
 import { AnswerLayerClient } from "./client.js";
 import { formatJson, formatList, formatQueryResult } from "./format.js";
 import { DEFAULT_BASE_URL, readConfig, resolveAuth, writeConfig } from "./config.js";
+import { localUp } from "./local.js";
 
 const SEMANTIC_RESOURCES = new Set([
   "entities",
@@ -34,6 +35,11 @@ export async function main(argv, io) {
 
   if (group === "init") {
     return initialize(parsed, io);
+  }
+
+  if (group === "local") {
+    if (command !== "up") throw usage("Expected `answerlayer local up`");
+    return localUp(parsed, io);
   }
 
   const { baseUrl, apiKey } = resolveAuth(parsed.flags, io.env);
@@ -1244,6 +1250,7 @@ function normalizeFlagName(rawName) {
     "--relationship-type": "relationshipType",
     "--join": "join",
     "--form": "form",
+    "--stack-dir": "stackDir",
   };
 
   return aliases[rawName] || rawName.replace(/^-+/, "").replace(/-([a-z])/g, (_, letter) => letter.toUpperCase());
@@ -1337,6 +1344,7 @@ function helpText() {
 
 Usage:
   answerlayer skills install [--path <directory>] [--force]
+  answerlayer local up [--stack-dir <directory>]
   answerlayer init --api-key <key> [--base-url <url>]
   answerlayer configure --base-url <url> --api-key <key>
   answerlayer health
