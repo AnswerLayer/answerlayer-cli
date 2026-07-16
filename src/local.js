@@ -57,11 +57,19 @@ export async function localUp(parsed, io) {
   const bootstrap = checked(run, "make", ["local-bootstrap"], { cwd: stackDir });
   const credentials = { baseUrl, apiKey: parseBootstrapApiKey(bootstrap.stdout) };
 
-  const client = new AnswerLayerClient({ ...credentials, fetchImpl: io.fetch || globalThis.fetch });
-  await client.rawRequest("GET", "/api/v1/auth/me");
-
+  // Bootstrap rotates the previous key, so persist the replacement before any
+  // network verification that may fail transiently. This keeps the only valid
+  // credential recoverable for a retry.
   const existing = readConfig(io.env);
   const configPath = writeConfig({ ...existing, ...credentials }, io.env);
+
+  const client = new AnswerLayerClient({ ...credentials, fetchImpl: io.fetch || globalThis.fetch });
+  try {
+    await client.rawRequest("GET", "/api/v1/auth/me");
+  } catch (error) {
+    throw new Error(`Saved rotated local credentials to ${configPath}, but verification failed: ${error.message}`);
+  }
+
   write(io.stdout, `Local AnswerLayer is ready. Verified credentials and saved config to ${configPath}\n`);
   write(io.stdout, "Next: answerlayer connections list\n");
 }
@@ -110,14 +118,14 @@ function parsePublishedBaseUrl(stdout) {
   const publishedAddress = String(stdout)
     .split(/\r?\n/)
     .map(line => line.trim())
-    .find(line => /^(?:0\.0\.0\.0|127\.0\.0\.1|localhost|\[::\]|::):\d+$/.test(line));
-  const port = publishedAddress
-    ? Number.parseInt(publishedAddress.slice(publishedAddress.lastIndexOf(":") + 1), 10)
-    : 0;
+    .map(line => line.match(/^(0\.0\.0\.0|127\.0\.0\.1|localhost|\[::\]|\[::1\]|::):(\d+)$/))
+    .find(Boolean);
+  const port = publishedAddress ? Number.parseInt(publishedAddress[2], 10) : 0;
   if (port < 1 || port > 65535) {
     throw new Error("Docker Compose did not publish answerlayer port 8000 on a local host interface");
   }
-  return `http://127.0.0.1:${port}`;
+  const host = publishedAddress[1] === "[::1]" ? "[::1]" : "127.0.0.1";
+  return `http://${host}:${port}`;
 }
 
 async function waitUntilHealthy(baseUrl, io) {

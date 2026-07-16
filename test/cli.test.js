@@ -171,7 +171,7 @@ test("local up clones, starts, bootstraps, verifies, and configures the local st
       return { status: 0, stdout: "git@github.com:AnswerLayer/answerlayer-core.git\n", stderr: "" };
     }
     if (command === "docker" && args.includes("port")) {
-      return { status: 0, stdout: ":::49152\n", stderr: "" };
+      return { status: 0, stdout: "[::1]:49152\n", stderr: "" };
     }
     if (command === "make") {
       return {
@@ -185,7 +185,7 @@ test("local up clones, starts, bootstraps, verifies, and configures the local st
 
   const fetchImpl = async (url, init = {}) => {
     if (String(url).endsWith("/healthz")) return new Response("ok");
-    assert.equal(String(url), "http://127.0.0.1:49152/api/v1/auth/me");
+    assert.equal(String(url), "http://[::1]:49152/api/v1/auth/me");
     assert.equal(init.headers["X-API-Key"], "al_local_secret");
     return new Response(JSON.stringify({ email: "local@answerlayer.test" }), {
       headers: { "content-type": "application/json" },
@@ -212,13 +212,61 @@ test("local up clones, starts, bootstraps, verifies, and configures the local st
     ["make", "local-bootstrap"],
   ]);
   assert.deepEqual(JSON.parse(fs.readFileSync(configPath, "utf8")), {
-    baseUrl: "http://127.0.0.1:49152",
+    baseUrl: "http://[::1]:49152",
     apiKey: "al_local_secret",
   });
   assert.equal(fs.statSync(path.join(stackDir, ".env")).mode & 0o777, 0o600);
   assert.match(fs.readFileSync(path.join(stackDir, ".env"), "utf8"), /ANTHROPIC_API_KEY=sk-ant-local/);
   assert.doesNotMatch(output.text(), /al_local_secret/);
   assert.match(output.text(), /Local AnswerLayer is ready/);
+});
+
+test("local up preserves the rotated key when verification fails", async () => {
+  const stackDir = createCoreCheckout();
+  const configPath = path.join(path.dirname(stackDir), "config.json");
+  fs.writeFileSync(path.join(stackDir, ".env"), "ANTHROPIC_API_KEY=local\n");
+  fs.writeFileSync(configPath, `${JSON.stringify({
+    baseUrl: "http://127.0.0.1:8000",
+    apiKey: "al_local_revoked",
+  })}\n`);
+
+  const runCommand = (command, args) => {
+    if (command === "git" && args.includes("get-url")) {
+      return { status: 0, stdout: "https://github.com/AnswerLayer/answerlayer-core.git\n", stderr: "" };
+    }
+    if (command === "docker" && args.includes("port")) {
+      return { status: 0, stdout: "127.0.0.1:49152\n", stderr: "" };
+    }
+    if (command === "make") {
+      return {
+        status: 0,
+        stdout: "answerlayer init --api-key al_local_replacement --base-url http://localhost:8000\n",
+        stderr: "",
+      };
+    }
+    return { status: 0, stdout: "", stderr: "" };
+  };
+
+  await assert.rejects(
+    main(["local", "up", "--stack-dir", stackDir], {
+      env: { ANSWERLAYER_CONFIG: configPath },
+      stdin: readableStdin(),
+      stdout: captureStream(),
+      stderr: captureStream(),
+      runCommand,
+      fetch: async (url) => {
+        if (String(url).endsWith("/healthz")) return new Response("ok");
+        throw new Error("temporary network failure");
+      },
+      sleep: async () => {},
+    }),
+    /Saved rotated local credentials .* verification failed: temporary network failure/,
+  );
+
+  assert.deepEqual(JSON.parse(fs.readFileSync(configPath, "utf8")), {
+    baseUrl: "http://127.0.0.1:49152",
+    apiKey: "al_local_replacement",
+  });
 });
 
 test("local up requires the provider key before creating a new checkout", async () => {
