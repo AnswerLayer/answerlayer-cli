@@ -211,6 +211,131 @@ test("documents upload builds multipart request ergonomically", async () => {
   assert.deepEqual(JSON.parse(output.text()), { ok: true });
 });
 
+test("evals suites create maps common flags to the evaluation API", async () => {
+  const originalFetch = globalThis.fetch;
+  const output = captureStream();
+
+  globalThis.fetch = async (url, init) => {
+    assert.equal(String(url), "https://answerlayer.example/api/v1/evals/suites");
+    assert.equal(init.method, "POST");
+    assert.deepEqual(JSON.parse(init.body), {
+      name: "Revenue checks",
+      connection_id: "connection-1",
+      description: "Critical revenue questions",
+    });
+    return new Response(JSON.stringify({ id: "suite-1" }), {
+      status: 201,
+      headers: { "content-type": "application/json" },
+    });
+  };
+
+  try {
+    await main([
+      "evals", "suites", "create",
+      "--base-url", "https://answerlayer.example",
+      "--api-key", "al_live_test",
+      "--name", "Revenue checks",
+      "--connection", "connection-1",
+      "--description", "Critical revenue questions",
+    ], {
+      env: {},
+      stdin: readableStdin(),
+      stdout: output,
+      stderr: captureStream(),
+    });
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+
+  assert.deepEqual(JSON.parse(output.text()), { id: "suite-1" });
+});
+
+test("evals cases create accepts evaluator flags and repeated constraints", async () => {
+  const originalFetch = globalThis.fetch;
+  const output = captureStream();
+
+  globalThis.fetch = async (url, init) => {
+    assert.equal(String(url), "https://answerlayer.example/api/v1/evals/suites/suite-1/cases");
+    assert.equal(init.method, "POST");
+    assert.deepEqual(JSON.parse(init.body), {
+      title: "Monthly revenue",
+      question: "What was revenue last month?",
+      expected_sql: "select sum(amount) from orders",
+      expected_values: [1200, "USD"],
+      required_tools: ["query_database", "format_answer"],
+      forbidden_tools: ["web_search"],
+      tags: ["revenue", "critical"],
+      evaluator_config: { answer_similarity_weight: 0.5 },
+      numeric_tolerance: 0.1,
+      pass_threshold: 90,
+    });
+    return new Response(JSON.stringify({ id: "case-1" }), {
+      status: 201,
+      headers: { "content-type": "application/json" },
+    });
+  };
+
+  try {
+    await main([
+      "evals", "cases", "create", "suite-1",
+      "--base-url", "https://answerlayer.example",
+      "--api-key", "al_live_test",
+      "--title", "Monthly revenue",
+      "--question", "What was revenue last month?",
+      "--expected-sql", "select sum(amount) from orders",
+      "--expected-values", '[1200,"USD"]',
+      "--required-tool", "query_database,format_answer",
+      "--forbidden-tool", "web_search",
+      "--tag", "revenue",
+      "--tag", "critical",
+      "--evaluator-config", '{"answer_similarity_weight":0.5}',
+      "--numeric-tolerance", "0.1",
+      "--pass-threshold", "90",
+    ], {
+      env: {},
+      stdin: readableStdin(),
+      stdout: output,
+      stderr: captureStream(),
+    });
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+
+  assert.deepEqual(JSON.parse(output.text()), { id: "case-1" });
+});
+
+test("evals runs compare sends the requested baseline", async () => {
+  const originalFetch = globalThis.fetch;
+  const output = captureStream();
+
+  globalThis.fetch = async (url, init) => {
+    assert.equal(String(url), "https://answerlayer.example/api/v1/evals/runs/run-2/compare?baseline_run_id=run-1");
+    assert.equal(init.method, "GET");
+    return new Response(JSON.stringify({ regressions: 0 }), {
+      status: 200,
+      headers: { "content-type": "application/json" },
+    });
+  };
+
+  try {
+    await main([
+      "evals", "runs", "compare", "run-2",
+      "--base-url", "https://answerlayer.example",
+      "--api-key", "al_live_test",
+      "--baseline", "run-1",
+    ], {
+      env: {},
+      stdin: readableStdin(),
+      stdout: output,
+      stderr: captureStream(),
+    });
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+
+  assert.deepEqual(JSON.parse(output.text()), { regressions: 0 });
+});
+
 function readableStdin() {
   const stream = Readable.from([]);
   stream.isTTY = true;
