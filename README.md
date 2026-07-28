@@ -130,7 +130,8 @@ Useful scopes:
 - `saved_query:read`, `saved_query:execute`, and `saved_query:write` for saved-query workflows
 - `semantic:read`, `semantic:write`, and `semantic:generate` for semantic-layer workflows
 - `dashboard:read`, `dashboard:write`, `tile:read`, and `tile:write` for dashboard workflows
-- `inquiry:execute` for natural-language inquiry
+- `inquiry:read` to inspect inquiry sessions and evaluation suites/runs
+- `inquiry:execute` for natural-language inquiry and to manage/run evaluations
 
 ## Commands
 
@@ -159,6 +160,11 @@ answerlayer semantic metrics generate --connection <connection-id> --prompt "Saa
 answerlayer inquiry ask --connection <connection-id> "What changed in revenue this month?"
 answerlayer inquiry ask --session <session-id> "Break that down by region"
 
+answerlayer evals suites create --name "Revenue checks" --connection <connection-id>
+answerlayer evals cases create <suite-id> --title "Monthly revenue" --question "What was revenue last month?" --expected-sql "select sum(amount) from orders where ..."
+answerlayer evals runs create <suite-id> --label "Before prompt change"
+answerlayer evals runs compare <run-id> --baseline <baseline-run-id>
+
 answerlayer dashboards create --title "Executive overview" --visibility org
 answerlayer tiles create --title "Revenue" --source-type saved_query --source <saved-query-id>
 answerlayer dashboards attach-tile <dashboard-id> --tile <tile-id> --x 0 --y 0 --w 6 --h 4
@@ -182,7 +188,7 @@ answerlayer branding update --data-file ./branding.json
 ## Command groups
 
 - Core: `api-keys`, `connections`, `metadata`, `query`, `query-results`
-- Data products: `saved-queries`, `semantic`, `inquiry`, `generation`, `tiles`, `dashboards`
+- Data products: `saved-queries`, `semantic`, `inquiry`, `evals`, `generation`, `tiles`, `dashboards`
 - Supporting resources: `documents`, `branding`, `uploads`, `chains`, `users`, `org`, `roles`, `billing`, `stats`
 
 ## Development
