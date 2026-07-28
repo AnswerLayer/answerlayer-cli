@@ -56,6 +56,7 @@ export async function main(argv, io) {
   if (group === "saved-queries" || group === "saved") return handleSavedQueries(client, command, positionals, parsed, io);
   if (group === "semantic") return handleSemantic(client, command, positionals, parsed, io);
   if (group === "inquiry") return handleInquiry(client, command, positionals, parsed, io);
+  if (group === "evals" || group === "evaluations") return handleEvals(client, command, positionals, parsed, io);
   if (group === "generation") return handleGeneration(client, command, positionals, parsed, io);
   if (group === "tiles") return handleTiles(client, command, positionals, parsed, io);
   if (group === "dashboards") return handleDashboards(client, command, positionals, parsed, io);
@@ -572,6 +573,119 @@ async function handleInquiry(client, command, positionals, parsed, io) {
   throw usage(`Unknown inquiry command: ${command}`);
 }
 
+async function handleEvals(client, resource, positionals, parsed, io) {
+  const [command, ...rest] = positionals;
+  const base = "/api/v1/evals";
+
+  if (resource === "suites" || resource === "suite") {
+    if (command === "list" || !command) {
+      return requestAndPrint(client, "GET", `${base}/suites`, parsed, io, {
+        query: {
+          connection_id: firstValue(parsed.flags.connection),
+          include_inactive: parsed.flags.includeInactive || undefined,
+        },
+        table: [
+          { key: "id", label: "ID" },
+          { key: "name", label: "Name" },
+          { key: "connection_id", label: "Connection" },
+          { key: "version", label: "Version" },
+          { key: "case_count", label: "Cases" },
+          { key: "is_active", label: "Active" },
+        ],
+      });
+    }
+
+    if (command === "create") {
+      const payload = await readData(parsed.flags, io, {
+        name: firstValue(parsed.flags.name),
+        connection_id: firstValue(parsed.flags.connection),
+        description: firstValue(parsed.flags.description),
+      });
+      requirePayloadValue(payload, "name", "evals suites create requires --name");
+      requirePayloadValue(payload, "connection_id", "evals suites create requires --connection");
+      return requestAndPrint(client, "POST", `${base}/suites`, parsed, io, { body: payload });
+    }
+
+    const suiteId = requirePositional(rest, 0, "eval suite id");
+    if (command === "get") return requestAndPrint(client, "GET", `${base}/suites/${encodeURIComponent(suiteId)}`, parsed, io);
+    if (command === "update") {
+      return requestAndPrint(client, "PATCH", `${base}/suites/${encodeURIComponent(suiteId)}`, parsed, io, {
+        body: await readData(parsed.flags, io, {
+          name: firstValue(parsed.flags.name),
+          description: firstValue(parsed.flags.description),
+          is_active: activeFlag(parsed.flags),
+        }),
+      });
+    }
+    if (command === "delete") return requestAndPrint(client, "DELETE", `${base}/suites/${encodeURIComponent(suiteId)}`, parsed, io);
+    throw usage(`Unknown evals suites command: ${command}`);
+  }
+
+  if (resource === "cases" || resource === "case") {
+    if (command === "create") {
+      const suiteId = firstValue(parsed.flags.suite) || requirePositional(rest, 0, "eval suite id");
+      return requestAndPrint(client, "POST", `${base}/suites/${encodeURIComponent(suiteId)}/cases`, parsed, io, {
+        body: await readData(parsed.flags, io, evalCasePayload(parsed.flags)),
+      });
+    }
+
+    const caseId = requirePositional(rest, 0, "eval case id");
+    if (command === "update") {
+      return requestAndPrint(client, "PATCH", `${base}/cases/${encodeURIComponent(caseId)}`, parsed, io, {
+        body: await readData(parsed.flags, io, { ...evalCasePayload(parsed.flags), is_active: activeFlag(parsed.flags) }),
+      });
+    }
+    if (command === "delete") return requestAndPrint(client, "DELETE", `${base}/cases/${encodeURIComponent(caseId)}`, parsed, io);
+    throw usage(`Unknown evals cases command: ${command}`);
+  }
+
+  if (resource === "runs" || resource === "run") {
+    if (command === "list" || !command) {
+      return requestAndPrint(client, "GET", `${base}/runs`, parsed, io, {
+        query: {
+          suite_id: firstValue(parsed.flags.suite),
+          limit: firstValue(parsed.flags.limit),
+          offset: firstValue(parsed.flags.offset),
+        },
+        table: [
+          { key: "id", label: "ID" },
+          { key: "suite_id", label: "Suite" },
+          { key: "label", label: "Label" },
+          { key: "status", label: "Status" },
+          { key: "suite_version", label: "Version" },
+        ],
+      });
+    }
+
+    if (command === "create") {
+      const payload = await readData(parsed.flags, io, {
+        suite_id: firstValue(parsed.flags.suite) || rest[0],
+        label: firstValue(parsed.flags.label),
+        model: firstValue(parsed.flags.model),
+        baseline_run_id: firstValue(parsed.flags.baseline),
+      });
+      requirePayloadValue(payload, "suite_id", "evals runs create requires a suite id or --suite");
+      return requestAndPrint(client, "POST", `${base}/runs`, parsed, io, { body: payload });
+    }
+
+    const runId = requirePositional(rest, 0, "eval run id");
+    if (command === "get") {
+      return requestAndPrint(client, "GET", `${base}/runs/${encodeURIComponent(runId)}`, parsed, io, {
+        query: { include_semantic_snapshot: parsed.flags.includeSemanticSnapshot || undefined },
+      });
+    }
+    if (command === "cancel") return requestAndPrint(client, "POST", `${base}/runs/${encodeURIComponent(runId)}/cancel`, parsed, io);
+    if (command === "compare") {
+      return requestAndPrint(client, "GET", `${base}/runs/${encodeURIComponent(runId)}/compare`, parsed, io, {
+        query: { baseline_run_id: firstValue(parsed.flags.baseline) },
+      });
+    }
+    throw usage(`Unknown evals runs command: ${command}`);
+  }
+
+  throw usage(`Expected evals resource: suites, cases, or runs`);
+}
+
 async function handleGeneration(client, command, positionals, parsed, io) {
   const base = "/api/v1/semantic/jobs";
   if (command === "start" || command === "create") {
@@ -997,6 +1111,29 @@ function queryPayload(flags, sql) {
   };
 }
 
+function evalCasePayload(flags) {
+  return {
+    title: firstValue(flags.title),
+    question: firstValue(flags.question),
+    expected_answer: firstValue(flags.expectedAnswer),
+    expected_sql: firstValue(flags.expectedSql) || firstValue(flags.sql),
+    expected_values: parseJsonFlag(firstValue(flags.expectedValues), "expected-values"),
+    required_tools: optionalCsvOrRepeated(flags.requiredTool),
+    forbidden_tools: optionalCsvOrRepeated(flags.forbiddenTool),
+    tags: optionalCsvOrRepeated(flags.tag),
+    evaluator_config: parseJsonFlag(firstValue(flags.evaluatorConfig), "evaluator-config"),
+    numeric_tolerance: parseNumber(firstValue(flags.numericTolerance), "numeric-tolerance"),
+    pass_threshold: parseNumber(firstValue(flags.passThreshold), "pass-threshold"),
+  };
+}
+
+function activeFlag(flags) {
+  if (flags.active && flags.inactive) throw usage("Use only one of --active or --inactive");
+  if (flags.active) return true;
+  if (flags.inactive) return false;
+  return undefined;
+}
+
 async function semanticPayload(resource, flags, positionals, io) {
   const common = {
     name: firstValue(flags.name) || positionals.join(" ") || undefined,
@@ -1244,6 +1381,24 @@ function normalizeFlagName(rawName) {
     "--summary": "summary",
     "--session": "session",
     "--question": "question",
+    "--suite": "suite",
+    "--suite-id": "suite",
+    "--label": "label",
+    "--baseline": "baseline",
+    "--baseline-run": "baseline",
+    "--expected-answer": "expectedAnswer",
+    "--expected-sql": "expectedSql",
+    "--expected-values": "expectedValues",
+    "--required-tool": "requiredTool",
+    "--forbidden-tool": "forbiddenTool",
+    "--tag": "tag",
+    "--evaluator-config": "evaluatorConfig",
+    "--numeric-tolerance": "numericTolerance",
+    "--pass-threshold": "passThreshold",
+    "--active": "active",
+    "--inactive": "inactive",
+    "--include-inactive": "includeInactive",
+    "--include-semantic-snapshot": "includeSemanticSnapshot",
     "--turn": "turn",
     "--from": "from",
     "--to": "to",
@@ -1257,7 +1412,7 @@ function normalizeFlagName(rawName) {
 }
 
 function isBooleanFlag(rawName) {
-  return ["--json", "--help", "-h", "--include", "-i", "--raw", "--admin", "--force"].includes(rawName);
+  return ["--json", "--help", "-h", "--include", "-i", "--raw", "--admin", "--force", "--active", "--inactive", "--include-inactive", "--include-semantic-snapshot"].includes(rawName);
 }
 
 function setFlag(flags, name, value) {
@@ -1282,6 +1437,13 @@ function parseInteger(value, fallback) {
   return parsed;
 }
 
+function parseNumber(value, name) {
+  if (value === undefined || value === null || value === "") return undefined;
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed)) throw usage(`Expected a number for --${name}, received ${value}`);
+  return parsed;
+}
+
 function requirePositional(positionals, index, label) {
   const value = positionals[index];
   if (!value) throw usage(`Missing ${label}`);
@@ -1299,6 +1461,10 @@ function requirePayloadValue(payload, key, message) {
 function csvOrRepeated(value) {
   const values = allValues(value);
   return values.flatMap((item) => String(item).split(",").map((part) => part.trim()).filter(Boolean));
+}
+
+function optionalCsvOrRepeated(value) {
+  return value === undefined ? undefined : csvOrRepeated(value);
 }
 
 function firstValue(value) {
@@ -1361,6 +1527,9 @@ Data products:
   answerlayer saved-queries list|get|create|update|delete|approve|unapprove|execute
   answerlayer semantic <entities|relationships|measures|metrics|dimensions|filters> list|get|create|update|delete|delete-all|generate
   answerlayer inquiry ask|sessions|create-session|session|update-session|delete-session|turn
+  answerlayer evals suites list|create|get|update|delete
+  answerlayer evals cases create|update|delete
+  answerlayer evals runs list|create|get|cancel|compare
   answerlayer generation start|list|get|status|stream|cancel|questions|guidance|delete
   answerlayer tiles list|get|create|update|data|delete
   answerlayer dashboards list|get|create|update|delete|duplicate|manifest|attach-tile|move-tile|detach-tile|assignments|assign|unassign|tile-data
