@@ -489,6 +489,20 @@ async function handleSemantic(client, command, positionals, parsed, io) {
 }
 
 async function handleInquiry(client, command, positionals, parsed, io) {
+  if (command === "models") {
+    return requestAndPrint(client, "GET", "/api/v1/inquiry/models", parsed, io, {
+      tableDataKey: "models",
+      tablePrefix: (data) => `Default model: ${data.default_model}\n\n`,
+      table: [
+        { key: "id", label: "ID" },
+        { key: "label", label: "Model" },
+        { key: "family", label: "Provider" },
+        { key: "transport", label: "Transport" },
+        { key: "description", label: "Description" },
+      ],
+    });
+  }
+
   if (command === "ask") {
     const question = firstValue(parsed.flags.question) || positionals.join(" ");
     const connectionId = firstValue(parsed.flags.connection);
@@ -663,6 +677,7 @@ async function handleEvals(client, resource, positionals, parsed, io) {
         label: firstValue(parsed.flags.label),
         model: firstValue(parsed.flags.model),
         baseline_run_id: firstValue(parsed.flags.baseline),
+        case_ids: optionalCsvOrRepeated(parsed.flags.case),
       });
       requirePayloadValue(payload, "suite_id", "evals runs create requires a suite id or --suite");
       return requestAndPrint(client, "POST", `${base}/runs`, parsed, io, { body: payload });
@@ -1259,6 +1274,7 @@ async function requestAndPrint(client, method, pathName, parsed, io, options = {
   if (!parsed.flags.json && options.table) {
     const rows = options.tableDataKey ? result.data[options.tableDataKey] : result.data;
     if (Array.isArray(rows)) {
+      if (options.tablePrefix) write(io.stdout, options.tablePrefix(result.data));
       write(io.stdout, formatList(rows, options.table));
       return;
     }
@@ -1386,6 +1402,8 @@ function normalizeFlagName(rawName) {
     "--label": "label",
     "--baseline": "baseline",
     "--baseline-run": "baseline",
+    "--case": "case",
+    "--case-id": "case",
     "--expected-answer": "expectedAnswer",
     "--expected-sql": "expectedSql",
     "--expected-values": "expectedValues",
@@ -1526,10 +1544,11 @@ Core:
 Data products:
   answerlayer saved-queries list|get|create|update|delete|approve|unapprove|execute
   answerlayer semantic <entities|relationships|measures|metrics|dimensions|filters> list|get|create|update|delete|delete-all|generate
-  answerlayer inquiry ask|sessions|create-session|session|update-session|delete-session|turn
+  answerlayer inquiry models|ask|sessions|create-session|session|update-session|delete-session|turn
   answerlayer evals suites list|create|get|update|delete
   answerlayer evals cases create|update|delete
   answerlayer evals runs list|create|get|cancel|compare
+    create accepts --case <case-id> (repeat or comma-separate to select cases)
   answerlayer generation start|list|get|status|stream|cancel|questions|guidance|delete
   answerlayer tiles list|get|create|update|data|delete
   answerlayer dashboards list|get|create|update|delete|duplicate|manifest|attach-tile|move-tile|detach-tile|assignments|assign|unassign|tile-data
