@@ -663,6 +663,7 @@ async function handleEvals(client, resource, positionals, parsed, io) {
         label: firstValue(parsed.flags.label),
         model: firstValue(parsed.flags.model),
         baseline_run_id: firstValue(parsed.flags.baseline),
+        case_ids: optionalCsvOrRepeated(parsed.flags.case),
       });
       requirePayloadValue(payload, "suite_id", "evals runs create requires a suite id or --suite");
       return requestAndPrint(client, "POST", `${base}/runs`, parsed, io, { body: payload });
@@ -1386,6 +1387,8 @@ function normalizeFlagName(rawName) {
     "--label": "label",
     "--baseline": "baseline",
     "--baseline-run": "baseline",
+    "--case": "case",
+    "--case-id": "case",
     "--expected-answer": "expectedAnswer",
     "--expected-sql": "expectedSql",
     "--expected-values": "expectedValues",
@@ -1530,6 +1533,7 @@ Data products:
   answerlayer evals suites list|create|get|update|delete
   answerlayer evals cases create|update|delete
   answerlayer evals runs list|create|get|cancel|compare
+    create accepts --case <case-id> (repeat or comma-separate to select cases)
   answerlayer generation start|list|get|status|stream|cancel|questions|guidance|delete
   answerlayer tiles list|get|create|update|data|delete
   answerlayer dashboards list|get|create|update|delete|duplicate|manifest|attach-tile|move-tile|detach-tile|assignments|assign|unassign|tile-data

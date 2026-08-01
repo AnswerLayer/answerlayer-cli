@@ -339,6 +339,7 @@ test("local up refuses to create an environment from an incompatible template", 
 test("defaults the base URL to the hosted SaaS when none is configured", async () => {
   const originalFetch = globalThis.fetch;
   const output = captureStream();
+  const configPath = path.join(fs.mkdtempSync(path.join(os.tmpdir(), "al-cli-empty-config-")), "config.json");
 
   globalThis.fetch = async (url) => {
     assert.equal(String(url), "https://app.answerlayer.io/api/v1/auth/me");
@@ -350,7 +351,7 @@ test("defaults the base URL to the hosted SaaS when none is configured", async (
 
   try {
     await main(["auth", "me", "--api-key", "al_live_test"], {
-      env: {},
+      env: { ANSWERLAYER_CONFIG: configPath },
       stdin: readableStdin(),
       stdout: output,
       stderr: captureStream(),
@@ -608,6 +609,45 @@ test("evals cases create accepts evaluator flags and repeated constraints", asyn
   }
 
   assert.deepEqual(JSON.parse(output.text()), { id: "case-1" });
+});
+
+test("evals runs create sends selected case IDs", async () => {
+  const originalFetch = globalThis.fetch;
+  const output = captureStream();
+
+  globalThis.fetch = async (url, init) => {
+    assert.equal(String(url), "https://answerlayer.example/api/v1/evals/runs");
+    assert.equal(init.method, "POST");
+    assert.deepEqual(JSON.parse(init.body), {
+      suite_id: "suite-1",
+      label: "Focused smoke run",
+      case_ids: ["case-1", "case-2", "case-3"],
+    });
+    return new Response(JSON.stringify({ run_id: "run-1", status: "queued" }), {
+      status: 202,
+      headers: { "content-type": "application/json" },
+    });
+  };
+
+  try {
+    await main([
+      "evals", "runs", "create", "suite-1",
+      "--base-url", "https://answerlayer.example",
+      "--api-key", "al_live_test",
+      "--label", "Focused smoke run",
+      "--case", "case-1,case-2",
+      "--case-id", "case-3",
+    ], {
+      env: {},
+      stdin: readableStdin(),
+      stdout: output,
+      stderr: captureStream(),
+    });
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+
+  assert.deepEqual(JSON.parse(output.text()), { run_id: "run-1", status: "queued" });
 });
 
 test("evals runs compare sends the requested baseline", async () => {
