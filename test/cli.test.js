@@ -518,6 +518,47 @@ test("documents upload builds multipart request ergonomically", async () => {
   assert.deepEqual(JSON.parse(output.text()), { ok: true });
 });
 
+test("inquiry models lists the deployment's available model catalog", async () => {
+  const originalFetch = globalThis.fetch;
+  const output = captureStream();
+
+  globalThis.fetch = async (url, init) => {
+    assert.equal(String(url), "https://answerlayer.example/api/v1/inquiry/models");
+    assert.equal(init.method, "GET");
+    return new Response(JSON.stringify({
+      default_model: "openai.gpt-5.6-terra",
+      models: [{
+        id: "openai.gpt-5.6-terra",
+        label: "GPT-5.6 Terra",
+        description: "Balanced production performance and cost",
+        family: "OpenAI",
+        transport: "responses",
+      }],
+    }), {
+      status: 200,
+      headers: { "content-type": "application/json" },
+    });
+  };
+
+  try {
+    await main([
+      "inquiry", "models",
+      "--base-url", "https://answerlayer.example",
+      "--api-key", "al_live_test",
+    ], {
+      env: {},
+      stdin: readableStdin(),
+      stdout: output,
+      stderr: captureStream(),
+    });
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+
+  assert.match(output.text(), /Default model: openai\.gpt-5\.6-terra/);
+  assert.match(output.text(), /GPT-5\.6 Terra/);
+});
+
 test("evals suites create maps common flags to the evaluation API", async () => {
   const originalFetch = globalThis.fetch;
   const output = captureStream();

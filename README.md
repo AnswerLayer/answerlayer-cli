@@ -159,11 +159,14 @@ answerlayer semantic metrics generate --connection <connection-id> --prompt "Saa
 
 answerlayer inquiry ask --connection <connection-id> "What changed in revenue this month?"
 answerlayer inquiry ask --session <session-id> "Break that down by region"
+answerlayer inquiry models
+answerlayer inquiry ask --connection <connection-id> --model claude-opus-4-6 "Investigate unusual revenue changes"
 
 answerlayer evals suites create --name "Revenue checks" --connection <connection-id>
 answerlayer evals cases create <suite-id> --title "Monthly revenue" --question "What was revenue last month?" --expected-sql "select sum(amount) from orders where ..."
 answerlayer evals runs create <suite-id> --label "Before prompt change"
 answerlayer evals runs create <suite-id> --case <case-id> --case <case-id> --label "Focused smoke run"
+answerlayer evals runs create <suite-id> --model claude-opus-4-6 --label "Model comparison"
 answerlayer evals runs compare <run-id> --baseline <baseline-run-id>
 
 answerlayer dashboards create --title "Executive overview" --visibility org

@@ -489,6 +489,20 @@ async function handleSemantic(client, command, positionals, parsed, io) {
 }
 
 async function handleInquiry(client, command, positionals, parsed, io) {
+  if (command === "models") {
+    return requestAndPrint(client, "GET", "/api/v1/inquiry/models", parsed, io, {
+      tableDataKey: "models",
+      tablePrefix: (data) => `Default model: ${data.default_model}\n\n`,
+      table: [
+        { key: "id", label: "ID" },
+        { key: "label", label: "Model" },
+        { key: "family", label: "Provider" },
+        { key: "transport", label: "Transport" },
+        { key: "description", label: "Description" },
+      ],
+    });
+  }
+
   if (command === "ask") {
     const question = firstValue(parsed.flags.question) || positionals.join(" ");
     const connectionId = firstValue(parsed.flags.connection);
@@ -1260,6 +1274,7 @@ async function requestAndPrint(client, method, pathName, parsed, io, options = {
   if (!parsed.flags.json && options.table) {
     const rows = options.tableDataKey ? result.data[options.tableDataKey] : result.data;
     if (Array.isArray(rows)) {
+      if (options.tablePrefix) write(io.stdout, options.tablePrefix(result.data));
       write(io.stdout, formatList(rows, options.table));
       return;
     }
@@ -1529,7 +1544,7 @@ Core:
 Data products:
   answerlayer saved-queries list|get|create|update|delete|approve|unapprove|execute
   answerlayer semantic <entities|relationships|measures|metrics|dimensions|filters> list|get|create|update|delete|delete-all|generate
-  answerlayer inquiry ask|sessions|create-session|session|update-session|delete-session|turn
+  answerlayer inquiry models|ask|sessions|create-session|session|update-session|delete-session|turn
   answerlayer evals suites list|create|get|update|delete
   answerlayer evals cases create|update|delete
   answerlayer evals runs list|create|get|cancel|compare
