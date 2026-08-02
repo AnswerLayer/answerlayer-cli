@@ -691,6 +691,41 @@ test("evals runs create sends selected case IDs", async () => {
   assert.deepEqual(JSON.parse(output.text()), { run_id: "run-1", status: "queued" });
 });
 
+test("evals runs create can disable the semantic layer", async () => {
+  const originalFetch = globalThis.fetch;
+  const output = captureStream();
+
+  globalThis.fetch = async (url, init) => {
+    assert.equal(String(url), "https://answerlayer.example/api/v1/evals/runs");
+    assert.deepEqual(JSON.parse(init.body), {
+      suite_id: "suite-1",
+      use_semantic_layer: false,
+    });
+    return new Response(JSON.stringify({ run_id: "run-1", status: "queued" }), {
+      status: 202,
+      headers: { "content-type": "application/json" },
+    });
+  };
+
+  try {
+    await main([
+      "evals", "runs", "create", "suite-1",
+      "--base-url", "https://answerlayer.example",
+      "--api-key", "al_live_test",
+      "--no-semantic-layer",
+    ], {
+      env: {},
+      stdin: readableStdin(),
+      stdout: output,
+      stderr: captureStream(),
+    });
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+
+  assert.deepEqual(JSON.parse(output.text()), { run_id: "run-1", status: "queued" });
+});
+
 test("evals runs compare sends the requested baseline", async () => {
   const originalFetch = globalThis.fetch;
   const output = captureStream();
