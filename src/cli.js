@@ -676,6 +676,7 @@ async function handleEvals(client, resource, positionals, parsed, io) {
         suite_id: firstValue(parsed.flags.suite) || rest[0],
         label: firstValue(parsed.flags.label),
         model: firstValue(parsed.flags.model),
+        use_semantic_layer: semanticLayerMode(parsed.flags),
         baseline_run_id: firstValue(parsed.flags.baseline),
         case_ids: optionalCsvOrRepeated(parsed.flags.case),
       });
@@ -1149,6 +1150,15 @@ function activeFlag(flags) {
   return undefined;
 }
 
+function semanticLayerMode(flags) {
+  if (flags.useSemanticLayer && flags.noSemanticLayer) {
+    throw usage("Use only one of --use-semantic-layer or --no-semantic-layer");
+  }
+  if (flags.useSemanticLayer) return true;
+  if (flags.noSemanticLayer) return false;
+  return undefined;
+}
+
 async function semanticPayload(resource, flags, positionals, io) {
   const common = {
     name: firstValue(flags.name) || positionals.join(" ") || undefined,
@@ -1392,6 +1402,8 @@ function normalizeFlagName(rawName) {
     "--h": "h",
     "--prompt": "prompt",
     "--model": "model",
+    "--use-semantic-layer": "useSemanticLayer",
+    "--no-semantic-layer": "noSemanticLayer",
     "--options": "options",
     "--status": "status",
     "--summary": "summary",
@@ -1430,7 +1442,7 @@ function normalizeFlagName(rawName) {
 }
 
 function isBooleanFlag(rawName) {
-  return ["--json", "--help", "-h", "--include", "-i", "--raw", "--admin", "--force", "--active", "--inactive", "--include-inactive", "--include-semantic-snapshot"].includes(rawName);
+  return ["--json", "--help", "-h", "--include", "-i", "--raw", "--admin", "--force", "--active", "--inactive", "--include-inactive", "--include-semantic-snapshot", "--use-semantic-layer", "--no-semantic-layer"].includes(rawName);
 }
 
 function setFlag(flags, name, value) {
@@ -1548,7 +1560,8 @@ Data products:
   answerlayer evals suites list|create|get|update|delete
   answerlayer evals cases create|update|delete
   answerlayer evals runs list|create|get|cancel|compare
-    create accepts --case <case-id> (repeat or comma-separate to select cases)
+    create accepts --case <case-id> (repeat or comma-separate), and
+    --use-semantic-layer or --no-semantic-layer
   answerlayer generation start|list|get|status|stream|cancel|questions|guidance|delete
   answerlayer tiles list|get|create|update|data|delete
   answerlayer dashboards list|get|create|update|delete|duplicate|manifest|attach-tile|move-tile|detach-tile|assignments|assign|unassign|tile-data
