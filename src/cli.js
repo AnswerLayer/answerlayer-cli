@@ -697,6 +697,9 @@ async function handleEvals(client, resource, positionals, parsed, io) {
         query: { baseline_run_id: firstValue(parsed.flags.baseline) },
       });
     }
+    if (command === "analyze" || command === "analysis") {
+      return requestAndPrint(client, "GET", `${base}/runs/${encodeURIComponent(runId)}/analysis`, parsed, io);
+    }
     throw usage(`Unknown evals runs command: ${command}`);
   }
 
@@ -1570,7 +1573,7 @@ Data products:
   answerlayer inquiry models|ask|sessions|create-session|session|update-session|delete-session|turn
   answerlayer evals suites list|create|get|update|delete
   answerlayer evals cases create|update|delete
-  answerlayer evals runs list|create|get|cancel|compare
+  answerlayer evals runs list|create|get|cancel|compare|analyze
     case create/update accept --category <name>
     run create accepts --case <case-id> (repeat or comma-separate) and
     --category <name> (repeat; category and case selectors are unioned), and

@@ -169,6 +169,7 @@ answerlayer evals runs create <suite-id> --case <case-id> --case <case-id> --lab
 answerlayer evals runs create <suite-id> --category Revenue --category Finance --case <case-id> --label "Focused category run"
 answerlayer evals runs create <suite-id> --model claude-opus-4-6 --label "Model comparison"
 answerlayer evals runs compare <run-id> --baseline <baseline-run-id>
+answerlayer evals runs analyze <run-id> --json
 
 answerlayer dashboards create --title "Executive overview" --visibility org
 answerlayer tiles create --title "Revenue" --source-type saved_query --source <saved-query-id>

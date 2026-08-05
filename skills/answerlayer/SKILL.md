@@ -147,7 +147,7 @@ to see exact flags before using one:
 - `saved-queries` — list / get / create / execute reusable queries
 - `semantic` — entities, relationships, measures, metrics, dimensions, filters
   (most need `--connection <id>`)
-- `evals` — create evaluation suites and cases, run them, and compare runs
+- `evals` — create evaluation suites and cases, run them, compare runs, and retrieve evidence-backed failure analysis
 - `dashboards`, `tiles` — build and read dashboards
 - `documents` — upload business-context docs and link them to connections
 - `connections` — create / test / inspect schema
