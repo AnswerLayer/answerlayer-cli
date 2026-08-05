@@ -698,7 +698,7 @@ test("evals runs create sends selected case IDs", async () => {
       suite_id: "suite-1",
       label: "Focused smoke run",
       case_ids: ["case-1", "case-2", "case-3"],
-      categories: ["Revenue", "Finance"],
+      categories: ["Revenue", "Finance", "Sales, Americas"],
     });
     return new Response(JSON.stringify({ run_id: "run-1", status: "queued" }), {
       status: 202,
@@ -714,7 +714,9 @@ test("evals runs create sends selected case IDs", async () => {
       "--label", "Focused smoke run",
       "--case", "case-1,case-2",
       "--case-id", "case-3",
-      "--category", "Revenue,Finance",
+      "--category", "Revenue",
+      "--category", "Finance",
+      "--category", "Sales, Americas",
       "--category", "Revenue",
     ], {
       env: {},

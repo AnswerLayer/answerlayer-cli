@@ -679,7 +679,7 @@ async function handleEvals(client, resource, positionals, parsed, io) {
         use_semantic_layer: semanticLayerMode(parsed.flags),
         baseline_run_id: firstValue(parsed.flags.baseline),
         case_ids: optionalCsvOrRepeated(parsed.flags.case),
-        categories: optionalDistinctCsvOrRepeated(parsed.flags.category),
+        categories: optionalDistinctRepeated(parsed.flags.category),
       });
       requirePayloadValue(payload, "suite_id", "evals runs create requires a suite id or --suite");
       return requestAndPrint(client, "POST", `${base}/runs`, parsed, io, { body: payload });
@@ -1500,9 +1500,12 @@ function optionalCsvOrRepeated(value) {
   return value === undefined ? undefined : csvOrRepeated(value);
 }
 
-function optionalDistinctCsvOrRepeated(value) {
-  const values = optionalCsvOrRepeated(value);
-  return values === undefined ? undefined : [...new Set(values)];
+function optionalDistinctRepeated(value) {
+  if (value === undefined) return undefined;
+  const values = allValues(value)
+    .map((item) => String(item).trim())
+    .filter(Boolean);
+  return [...new Set(values)];
 }
 
 function firstValue(value) {
@@ -1569,8 +1572,8 @@ Data products:
   answerlayer evals cases create|update|delete
   answerlayer evals runs list|create|get|cancel|compare
     case create/update accept --category <name>
-    run create accepts --case <case-id> and --category <name>
-    (repeat or comma-separate; category and case selectors are unioned), and
+    run create accepts --case <case-id> (repeat or comma-separate) and
+    --category <name> (repeat; category and case selectors are unioned), and
     --use-semantic-layer or --no-semantic-layer
   answerlayer generation start|list|get|status|stream|cancel|questions|guidance|delete
   answerlayer tiles list|get|create|update|data|delete
