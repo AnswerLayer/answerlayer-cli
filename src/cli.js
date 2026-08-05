@@ -679,6 +679,7 @@ async function handleEvals(client, resource, positionals, parsed, io) {
         use_semantic_layer: semanticLayerMode(parsed.flags),
         baseline_run_id: firstValue(parsed.flags.baseline),
         case_ids: optionalCsvOrRepeated(parsed.flags.case),
+        categories: optionalDistinctCsvOrRepeated(parsed.flags.category),
       });
       requirePayloadValue(payload, "suite_id", "evals runs create requires a suite id or --suite");
       return requestAndPrint(client, "POST", `${base}/runs`, parsed, io, { body: payload });
@@ -1131,6 +1132,7 @@ function evalCasePayload(flags) {
   return {
     title: firstValue(flags.title),
     question: firstValue(flags.question),
+    category: firstValue(flags.category),
     expected_answer: firstValue(flags.expectedAnswer),
     expected_sql: firstValue(flags.expectedSql) || firstValue(flags.sql),
     expected_values: parseJsonFlag(firstValue(flags.expectedValues), "expected-values"),
@@ -1416,6 +1418,7 @@ function normalizeFlagName(rawName) {
     "--baseline-run": "baseline",
     "--case": "case",
     "--case-id": "case",
+    "--category": "category",
     "--expected-answer": "expectedAnswer",
     "--expected-sql": "expectedSql",
     "--expected-values": "expectedValues",
@@ -1497,6 +1500,11 @@ function optionalCsvOrRepeated(value) {
   return value === undefined ? undefined : csvOrRepeated(value);
 }
 
+function optionalDistinctCsvOrRepeated(value) {
+  const values = optionalCsvOrRepeated(value);
+  return values === undefined ? undefined : [...new Set(values)];
+}
+
 function firstValue(value) {
   return Array.isArray(value) ? value[0] : value;
 }
@@ -1560,7 +1568,9 @@ Data products:
   answerlayer evals suites list|create|get|update|delete
   answerlayer evals cases create|update|delete
   answerlayer evals runs list|create|get|cancel|compare
-    create accepts --case <case-id> (repeat or comma-separate), and
+    case create/update accept --category <name>
+    run create accepts --case <case-id> and --category <name>
+    (repeat or comma-separate; category and case selectors are unioned), and
     --use-semantic-layer or --no-semantic-layer
   answerlayer generation start|list|get|status|stream|cancel|questions|guidance|delete
   answerlayer tiles list|get|create|update|data|delete
