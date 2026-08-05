@@ -679,14 +679,10 @@ async function handleEvals(client, resource, positionals, parsed, io) {
         use_semantic_layer: semanticLayerMode(parsed.flags),
         baseline_run_id: firstValue(parsed.flags.baseline),
         case_ids: optionalCsvOrRepeated(parsed.flags.case),
-        case_concurrency: parseBoundedInteger(
-          firstValue(parsed.flags.concurrency),
-          "concurrency",
-          1,
-          8,
-        ),
+        case_concurrency: firstValue(parsed.flags.concurrency),
       });
       requirePayloadValue(payload, "suite_id", "evals runs create requires a suite id or --suite");
+      normalizeEvalCaseConcurrency(payload);
       return requestAndPrint(client, "POST", `${base}/runs`, parsed, io, { body: payload });
     }
 
@@ -700,14 +696,10 @@ async function handleEvals(client, resource, positionals, parsed, io) {
         label: firstValue(parsed.flags.label),
         model: firstValue(parsed.flags.model),
         use_semantic_layer: semanticLayerMode(parsed.flags),
-        case_concurrency: parseBoundedInteger(
-          firstValue(parsed.flags.concurrency),
-          "concurrency",
-          1,
-          8,
-        ),
+        case_concurrency: firstValue(parsed.flags.concurrency),
       });
       requireEvalBatchSuites(payload.suite_ids);
+      normalizeEvalCaseConcurrency(payload);
       return requestAndPrint(client, "POST", `${base}/runs/batch`, parsed, io, {
         body: payload,
       });
@@ -1533,6 +1525,16 @@ function requireEvalBatchSuites(suiteIds) {
   if (new Set(suiteIds.map(String)).size !== suiteIds.length) {
     throw usage("evals runs create-batch requires distinct suite ids");
   }
+}
+
+function normalizeEvalCaseConcurrency(payload) {
+  if (payload.case_concurrency === undefined) return;
+  payload.case_concurrency = parseBoundedInteger(
+    payload.case_concurrency,
+    "concurrency",
+    1,
+    8,
+  );
 }
 
 function csvOrRepeated(value) {
