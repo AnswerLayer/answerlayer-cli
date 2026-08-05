@@ -859,23 +859,25 @@ test("evals runs create-batch validates suite selection", async () => {
 });
 
 test("evals runs create-batch validates concurrency from structured input", async () => {
-  await assert.rejects(
-    main([
-      "evals", "runs", "create-batch",
-      "--base-url", "https://answerlayer.example",
-      "--api-key", "al_live_test",
-      "--data", JSON.stringify({
-        suite_ids: ["suite-1", "suite-2"],
-        case_concurrency: 9,
+  for (const concurrency of [9, 2.5, true, [4], { value: 4 }, null]) {
+    await assert.rejects(
+      main([
+        "evals", "runs", "create-batch",
+        "--base-url", "https://answerlayer.example",
+        "--api-key", "al_live_test",
+        "--data", JSON.stringify({
+          suite_ids: ["suite-1", "suite-2"],
+          case_concurrency: concurrency,
+        }),
+      ], {
+        env: {},
+        stdin: readableStdin(),
+        stdout: captureStream(),
+        stderr: captureStream(),
       }),
-    ], {
-      env: {},
-      stdin: readableStdin(),
-      stdout: captureStream(),
-      stderr: captureStream(),
-    }),
-    /Expected --concurrency to be an integer from 1 to 8/,
-  );
+      /Expected --concurrency to be an integer from 1 to 8/,
+    );
+  }
 });
 
 test("evals runs compare sends the requested baseline", async () => {

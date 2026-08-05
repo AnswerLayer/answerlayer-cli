@@ -1496,7 +1496,10 @@ function parseNumber(value, name) {
 }
 
 function parseBoundedInteger(value, name, minimum, maximum) {
-  if (value === undefined || value === null || value === "") return undefined;
+  if (value === undefined || value === "") return undefined;
+  if (typeof value !== "string" && typeof value !== "number") {
+    throw usage(`Expected --${name} to be an integer from ${minimum} to ${maximum}`);
+  }
   const parsed = Number(value);
   if (!Number.isInteger(parsed) || parsed < minimum || parsed > maximum) {
     throw usage(`Expected --${name} to be an integer from ${minimum} to ${maximum}`);
