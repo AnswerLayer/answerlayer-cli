@@ -690,6 +690,29 @@ async function handleEvals(client, resource, positionals, parsed, io) {
       return requestAndPrint(client, "POST", `${base}/runs`, parsed, io, { body: payload });
     }
 
+    if (command === "create-batch") {
+      const selectedSuites = csvOrRepeated([
+        ...rest,
+        ...allValues(parsed.flags.suite),
+      ]);
+      const payload = await readData(parsed.flags, io, {
+        suite_ids: selectedSuites.length > 0 ? selectedSuites : undefined,
+        label: firstValue(parsed.flags.label),
+        model: firstValue(parsed.flags.model),
+        use_semantic_layer: semanticLayerMode(parsed.flags),
+        case_concurrency: parseBoundedInteger(
+          firstValue(parsed.flags.concurrency),
+          "concurrency",
+          1,
+          8,
+        ),
+      });
+      requireEvalBatchSuites(payload.suite_ids);
+      return requestAndPrint(client, "POST", `${base}/runs/batch`, parsed, io, {
+        body: payload,
+      });
+    }
+
     const runId = requirePositional(rest, 0, "eval run id");
     if (command === "get") {
       return requestAndPrint(client, "GET", `${base}/runs/${encodeURIComponent(runId)}`, parsed, io, {
@@ -1503,6 +1526,15 @@ function requirePayloadValue(payload, key, message) {
   if (!payload[key]) throw usage(message);
 }
 
+function requireEvalBatchSuites(suiteIds) {
+  if (!Array.isArray(suiteIds) || suiteIds.length < 2 || suiteIds.length > 20) {
+    throw usage("evals runs create-batch requires 2 to 20 suite ids");
+  }
+  if (new Set(suiteIds.map(String)).size !== suiteIds.length) {
+    throw usage("evals runs create-batch requires distinct suite ids");
+  }
+}
+
 function csvOrRepeated(value) {
   const values = allValues(value);
   return values.flatMap((item) => String(item).split(",").map((part) => part.trim()).filter(Boolean));
@@ -1574,10 +1606,13 @@ Data products:
   answerlayer inquiry models|ask|sessions|create-session|session|update-session|delete-session|turn
   answerlayer evals suites list|create|get|update|delete
   answerlayer evals cases create|update|delete
-  answerlayer evals runs list|create|get|cancel|compare
+  answerlayer evals runs list|create|create-batch|get|cancel|compare
     create accepts --case <case-id> (repeat or comma-separate),
     --concurrency <1-8> (default 3; 1 is serial), and
     --use-semantic-layer or --no-semantic-layer
+    create-batch accepts 2 to 20 suite ids as positionals or repeatable
+    --suite values, plus shared --label, --model, --concurrency <1-8>,
+    and --use-semantic-layer or --no-semantic-layer
   answerlayer generation start|list|get|status|stream|cancel|questions|guidance|delete
   answerlayer tiles list|get|create|update|data|delete
   answerlayer dashboards list|get|create|update|delete|duplicate|manifest|attach-tile|move-tile|detach-tile|assignments|assign|unassign|tile-data

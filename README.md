@@ -168,6 +168,7 @@ answerlayer evals runs create <suite-id> --label "Before prompt change"
 answerlayer evals runs create <suite-id> --case <case-id> --case <case-id> --label "Focused smoke run"
 answerlayer evals runs create <suite-id> --model claude-opus-4-6 --label "Model comparison"
 answerlayer evals runs create <suite-id> --concurrency 4 --label "Parallel smoke run"
+answerlayer evals runs create-batch --suite <suite-id> --suite <suite-id> --concurrency 4 --label "Release candidate"
 answerlayer evals runs compare <run-id> --baseline <baseline-run-id>
 
 answerlayer dashboards create --title "Executive overview" --visibility org
