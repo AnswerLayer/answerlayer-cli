@@ -1000,6 +1000,76 @@ test("evals runs compare sends the requested baseline", async () => {
   assert.deepEqual(JSON.parse(output.text()), { regressions: 0 });
 });
 
+test("evals runs analyze preserves structured findings and evidence identifiers", async () => {
+  const originalFetch = globalThis.fetch;
+  const output = captureStream();
+  const analysis = {
+    run_id: "run-2",
+    analysis_version: "1",
+    method: "deterministic_rules",
+    analysis_status: "complete",
+    total_case_count: 1,
+    analyzed_case_count: 1,
+    failed_case_count: 1,
+    warning_case_count: 0,
+    unclassified_case_count: 0,
+    findings: [{
+      code: "sql_result_mismatch",
+      category: "query_generation_or_sql_execution",
+      title: "SQL results did not match",
+      severity: "failure",
+      observed_summary: "1 case returned SQL rows that did not satisfy the configured result check.",
+      recommendations: [],
+      affected_case_count: 1,
+      affected_case_result_ids: ["result-1"],
+      affected_cases_truncated: false,
+      evidence_count: 1,
+      evidence_ids: ["case_result:result-1:criterion.result_match"],
+      evidence_truncated: false,
+    }],
+    evidence_count: 1,
+    evidence: [{
+      id: "case_result:result-1:criterion.result_match",
+      case_result_id: "result-1",
+      eval_case_id: "case-1",
+      case_title: "Monthly revenue",
+      source: "criterion.result_match",
+      observation: "The SQL result match check failed with score 0.",
+      details: { score: 0 },
+      details_truncated: false,
+    }],
+    evidence_truncated: false,
+    caveat: "Findings summarize stored evidence.",
+  };
+
+  globalThis.fetch = async (url, init) => {
+    assert.equal(String(url), "https://answerlayer.example/api/v1/evals/runs/run-2/analysis");
+    assert.equal(init.method, "GET");
+    return new Response(JSON.stringify(analysis), {
+      status: 200,
+      headers: { "content-type": "application/json" },
+    });
+  };
+
+  try {
+    await main([
+      "evals", "runs", "analyze", "run-2",
+      "--base-url", "https://answerlayer.example",
+      "--api-key", "al_live_test",
+      "--json",
+    ], {
+      env: {},
+      stdin: readableStdin(),
+      stdout: output,
+      stderr: captureStream(),
+    });
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+
+  assert.deepEqual(JSON.parse(output.text()), analysis);
+});
+
 function readableStdin() {
   const stream = Readable.from([]);
   stream.isTTY = true;

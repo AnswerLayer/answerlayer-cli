@@ -172,6 +172,7 @@ answerlayer evals runs create <suite-id> --concurrency 4 --label "Parallel smoke
 answerlayer evals runs create-batch --suite <suite-id> --suite <suite-id> --concurrency 4 --label "Release candidate"
 answerlayer evals runs update <run-id> --label "Prompt experiment B"
 answerlayer evals runs compare <run-id> --baseline <baseline-run-id>
+answerlayer evals runs analyze <run-id> --json
 
 answerlayer dashboards create --title "Executive overview" --visibility org
 answerlayer tiles create --title "Revenue" --source-type saved_query --source <saved-query-id>
