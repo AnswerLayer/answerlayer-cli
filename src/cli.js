@@ -696,6 +696,15 @@ async function handleEvals(client, resource, positionals, parsed, io) {
         query: { include_semantic_snapshot: parsed.flags.includeSemanticSnapshot || undefined },
       });
     }
+    if (command === "update") {
+      const payload = await readData(parsed.flags, io, {
+        label: firstValue(parsed.flags.label),
+      });
+      requirePayloadValue(payload, "label", "evals runs update requires --label");
+      return requestAndPrint(client, "PATCH", `${base}/runs/${encodeURIComponent(runId)}`, parsed, io, {
+        body: payload,
+      });
+    }
     if (command === "cancel") return requestAndPrint(client, "POST", `${base}/runs/${encodeURIComponent(runId)}/cancel`, parsed, io);
     if (command === "compare") {
       return requestAndPrint(client, "GET", `${base}/runs/${encodeURIComponent(runId)}/compare`, parsed, io, {
@@ -1574,10 +1583,11 @@ Data products:
   answerlayer inquiry models|ask|sessions|create-session|session|update-session|delete-session|turn
   answerlayer evals suites list|create|get|update|delete
   answerlayer evals cases create|update|delete
-  answerlayer evals runs list|create|get|cancel|compare
+  answerlayer evals runs list|create|get|update|cancel|compare
     create accepts --case <case-id> (repeat or comma-separate),
     --concurrency <1-8> (default 3; 1 is serial), and
     --use-semantic-layer or --no-semantic-layer
+    update accepts --label <name>
   answerlayer generation start|list|get|status|stream|cancel|questions|guidance|delete
   answerlayer tiles list|get|create|update|data|delete
   answerlayer dashboards list|get|create|update|delete|duplicate|manifest|attach-tile|move-tile|detach-tile|assignments|assign|unassign|tile-data
