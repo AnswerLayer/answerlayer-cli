@@ -679,6 +679,7 @@ async function handleEvals(client, resource, positionals, parsed, io) {
         use_semantic_layer: semanticLayerMode(parsed.flags),
         baseline_run_id: firstValue(parsed.flags.baseline),
         case_ids: optionalCsvOrRepeated(parsed.flags.case),
+        categories: optionalDistinctRepeated(parsed.flags.category),
         case_concurrency: firstValue(parsed.flags.concurrency),
       });
       requirePayloadValue(payload, "suite_id", "evals runs create requires a suite id or --suite");
@@ -1161,6 +1162,7 @@ function evalCasePayload(flags) {
   return {
     title: firstValue(flags.title),
     question: firstValue(flags.question),
+    category: firstValue(flags.category),
     expected_answer: firstValue(flags.expectedAnswer),
     expected_sql: firstValue(flags.expectedSql) || firstValue(flags.sql),
     expected_values: parseJsonFlag(firstValue(flags.expectedValues), "expected-values"),
@@ -1446,6 +1448,7 @@ function normalizeFlagName(rawName) {
     "--baseline-run": "baseline",
     "--case": "case",
     "--case-id": "case",
+    "--category": "category",
     "--expected-answer": "expectedAnswer",
     "--expected-sql": "expectedSql",
     "--expected-values": "expectedValues",
@@ -1558,6 +1561,14 @@ function optionalCsvOrRepeated(value) {
   return value === undefined ? undefined : csvOrRepeated(value);
 }
 
+function optionalDistinctRepeated(value) {
+  if (value === undefined) return undefined;
+  const values = allValues(value)
+    .map((item) => String(item).trim())
+    .filter(Boolean);
+  return [...new Set(values)];
+}
+
 function firstValue(value) {
   return Array.isArray(value) ? value[0] : value;
 }
@@ -1621,7 +1632,9 @@ Data products:
   answerlayer evals suites list|create|get|update|delete
   answerlayer evals cases create|update|delete
   answerlayer evals runs list|create|create-batch|get|update|cancel|compare
-    create accepts --case <case-id> (repeat or comma-separate),
+    case create/update accept --category <name>
+    run create accepts --case <case-id> (repeat or comma-separate) and
+    --category <name> (repeat; category and case selectors are unioned),
     --concurrency <1-8> (default 3; 1 is serial), and
     --use-semantic-layer or --no-semantic-layer
     create-batch accepts 2 to 20 suite ids as positionals or repeatable

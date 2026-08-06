@@ -608,6 +608,7 @@ test("evals cases create accepts evaluator flags and repeated constraints", asyn
     assert.deepEqual(JSON.parse(init.body), {
       title: "Monthly revenue",
       question: "What was revenue last month?",
+      category: "Revenue",
       expected_sql: "select sum(amount) from orders",
       expected_values: [1200, "USD"],
       required_tools: ["query_database", "format_answer"],
@@ -630,6 +631,7 @@ test("evals cases create accepts evaluator flags and repeated constraints", asyn
       "--api-key", "al_live_test",
       "--title", "Monthly revenue",
       "--question", "What was revenue last month?",
+      "--category", "Revenue",
       "--expected-sql", "select sum(amount) from orders",
       "--expected-values", '[1200,"USD"]',
       "--required-tool", "query_database,format_answer",
@@ -652,6 +654,39 @@ test("evals cases create accepts evaluator flags and repeated constraints", asyn
   assert.deepEqual(JSON.parse(output.text()), { id: "case-1" });
 });
 
+test("evals cases update accepts a category", async () => {
+  const originalFetch = globalThis.fetch;
+  const output = captureStream();
+
+  globalThis.fetch = async (url, init) => {
+    assert.equal(String(url), "https://answerlayer.example/api/v1/evals/cases/case-1");
+    assert.equal(init.method, "PATCH");
+    assert.deepEqual(JSON.parse(init.body), { category: "Finance" });
+    return new Response(JSON.stringify({ id: "case-1", category: "Finance" }), {
+      status: 200,
+      headers: { "content-type": "application/json" },
+    });
+  };
+
+  try {
+    await main([
+      "evals", "cases", "update", "case-1",
+      "--base-url", "https://answerlayer.example",
+      "--api-key", "al_live_test",
+      "--category", "Finance",
+    ], {
+      env: {},
+      stdin: readableStdin(),
+      stdout: output,
+      stderr: captureStream(),
+    });
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+
+  assert.deepEqual(JSON.parse(output.text()), { id: "case-1", category: "Finance" });
+});
+
 test("evals runs create sends selected case IDs", async () => {
   const originalFetch = globalThis.fetch;
   const output = captureStream();
@@ -663,6 +698,7 @@ test("evals runs create sends selected case IDs", async () => {
       suite_id: "suite-1",
       label: "Focused smoke run",
       case_ids: ["case-1", "case-2", "case-3"],
+      categories: ["Revenue", "Finance", "Sales, Americas"],
     });
     return new Response(JSON.stringify({ run_id: "run-1", status: "queued" }), {
       status: 202,
@@ -678,6 +714,10 @@ test("evals runs create sends selected case IDs", async () => {
       "--label", "Focused smoke run",
       "--case", "case-1,case-2",
       "--case-id", "case-3",
+      "--category", "Revenue",
+      "--category", "Finance",
+      "--category", "Sales, Americas",
+      "--category", "Revenue",
     ], {
       env: {},
       stdin: readableStdin(),
