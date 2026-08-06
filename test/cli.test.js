@@ -880,6 +880,54 @@ test("evals runs create-batch validates concurrency from structured input", asyn
   }
 });
 
+test("evals runs update renames a run", async () => {
+  const originalFetch = globalThis.fetch;
+  const output = captureStream();
+
+  globalThis.fetch = async (url, init) => {
+    assert.equal(String(url), "https://answerlayer.example/api/v1/evals/runs/run-1");
+    assert.equal(init.method, "PATCH");
+    assert.deepEqual(JSON.parse(init.body), { label: "Prompt experiment B" });
+    return new Response(JSON.stringify({ id: "run-1", label: "Prompt experiment B" }), {
+      status: 200,
+      headers: { "content-type": "application/json" },
+    });
+  };
+
+  try {
+    await main([
+      "evals", "runs", "update", "run-1",
+      "--base-url", "https://answerlayer.example",
+      "--api-key", "al_live_test",
+      "--label", "Prompt experiment B",
+    ], {
+      env: {},
+      stdin: readableStdin(),
+      stdout: output,
+      stderr: captureStream(),
+    });
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+
+  assert.deepEqual(JSON.parse(output.text()), { id: "run-1", label: "Prompt experiment B" });
+});
+
+test("evals runs update requires a label", async () => {
+  await assert.rejects(
+    main([
+      "evals", "runs", "update", "run-1",
+      "--base-url", "https://answerlayer.example",
+      "--api-key", "al_live_test",
+    ], {
+      env: {},
+      stdin: readableStdin(),
+      stdout: captureStream(),
+      stderr: captureStream(),
+    }),
+    /evals runs update requires --label/,
+  );
+});
 test("evals runs compare sends the requested baseline", async () => {
   const originalFetch = globalThis.fetch;
   const output = captureStream();
