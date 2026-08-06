@@ -781,6 +781,105 @@ test("evals runs create validates the case concurrency limit", async () => {
   }
 });
 
+test("evals runs create-batch sends suite ids and shared configuration", async () => {
+  const originalFetch = globalThis.fetch;
+  const output = captureStream();
+
+  globalThis.fetch = async (url, init) => {
+    assert.equal(String(url), "https://answerlayer.example/api/v1/evals/runs/batch");
+    assert.equal(init.method, "POST");
+    assert.deepEqual(JSON.parse(init.body), {
+      suite_ids: ["suite-1", "suite-2", "suite-3"],
+      label: "Release candidate",
+      model: "moonshotai.kimi-k2.5",
+      use_semantic_layer: false,
+      case_concurrency: 4,
+    });
+    return new Response(JSON.stringify({
+      runs: [
+        { suite_id: "suite-1", run_id: "run-1", status: "queued" },
+        { suite_id: "suite-2", run_id: "run-2", status: "queued" },
+        { suite_id: "suite-3", run_id: "run-3", status: "queued" },
+      ],
+    }), {
+      status: 202,
+      headers: { "content-type": "application/json" },
+    });
+  };
+
+  try {
+    await main([
+      "evals", "runs", "create-batch", "suite-1",
+      "--base-url", "https://answerlayer.example",
+      "--api-key", "al_live_test",
+      "--suite", "suite-2,suite-3",
+      "--label", "Release candidate",
+      "--model", "moonshotai.kimi-k2.5",
+      "--no-semantic-layer",
+      "--concurrency", "4",
+    ], {
+      env: {},
+      stdin: readableStdin(),
+      stdout: output,
+      stderr: captureStream(),
+    });
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+
+  assert.equal(JSON.parse(output.text()).runs.length, 3);
+});
+
+test("evals runs create-batch validates suite selection", async () => {
+  const common = [
+    "--base-url", "https://answerlayer.example",
+    "--api-key", "al_live_test",
+  ];
+
+  await assert.rejects(
+    main(["evals", "runs", "create-batch", "suite-1", ...common], {
+      env: {},
+      stdin: readableStdin(),
+      stdout: captureStream(),
+      stderr: captureStream(),
+    }),
+    /requires 2 to 20 suite ids/,
+  );
+  await assert.rejects(
+    main([
+      "evals", "runs", "create-batch", "suite-1", "suite-1", ...common,
+    ], {
+      env: {},
+      stdin: readableStdin(),
+      stdout: captureStream(),
+      stderr: captureStream(),
+    }),
+    /requires distinct suite ids/,
+  );
+});
+
+test("evals runs create-batch validates concurrency from structured input", async () => {
+  for (const concurrency of [9, 2.5, true, [4], { value: 4 }, null]) {
+    await assert.rejects(
+      main([
+        "evals", "runs", "create-batch",
+        "--base-url", "https://answerlayer.example",
+        "--api-key", "al_live_test",
+        "--data", JSON.stringify({
+          suite_ids: ["suite-1", "suite-2"],
+          case_concurrency: concurrency,
+        }),
+      ], {
+        env: {},
+        stdin: readableStdin(),
+        stdout: captureStream(),
+        stderr: captureStream(),
+      }),
+      /Expected --concurrency to be an integer from 1 to 8/,
+    );
+  }
+});
+
 test("evals runs update renames a run", async () => {
   const originalFetch = globalThis.fetch;
   const output = captureStream();
@@ -829,7 +928,6 @@ test("evals runs update requires a label", async () => {
     /evals runs update requires --label/,
   );
 });
-
 test("evals runs compare sends the requested baseline", async () => {
   const originalFetch = globalThis.fetch;
   const output = captureStream();

@@ -679,15 +679,30 @@ async function handleEvals(client, resource, positionals, parsed, io) {
         use_semantic_layer: semanticLayerMode(parsed.flags),
         baseline_run_id: firstValue(parsed.flags.baseline),
         case_ids: optionalCsvOrRepeated(parsed.flags.case),
-        case_concurrency: parseBoundedInteger(
-          firstValue(parsed.flags.concurrency),
-          "concurrency",
-          1,
-          8,
-        ),
+        case_concurrency: firstValue(parsed.flags.concurrency),
       });
       requirePayloadValue(payload, "suite_id", "evals runs create requires a suite id or --suite");
+      normalizeEvalCaseConcurrency(payload);
       return requestAndPrint(client, "POST", `${base}/runs`, parsed, io, { body: payload });
+    }
+
+    if (command === "create-batch") {
+      const selectedSuites = csvOrRepeated([
+        ...rest,
+        ...allValues(parsed.flags.suite),
+      ]);
+      const payload = await readData(parsed.flags, io, {
+        suite_ids: selectedSuites.length > 0 ? selectedSuites : undefined,
+        label: firstValue(parsed.flags.label),
+        model: firstValue(parsed.flags.model),
+        use_semantic_layer: semanticLayerMode(parsed.flags),
+        case_concurrency: firstValue(parsed.flags.concurrency),
+      });
+      requireEvalBatchSuites(payload.suite_ids);
+      normalizeEvalCaseConcurrency(payload);
+      return requestAndPrint(client, "POST", `${base}/runs/batch`, parsed, io, {
+        body: payload,
+      });
     }
 
     const runId = requirePositional(rest, 0, "eval run id");
@@ -1490,7 +1505,10 @@ function parseNumber(value, name) {
 }
 
 function parseBoundedInteger(value, name, minimum, maximum) {
-  if (value === undefined || value === null || value === "") return undefined;
+  if (value === undefined || value === "") return undefined;
+  if (typeof value !== "string" && typeof value !== "number") {
+    throw usage(`Expected --${name} to be an integer from ${minimum} to ${maximum}`);
+  }
   const parsed = Number(value);
   if (!Number.isInteger(parsed) || parsed < minimum || parsed > maximum) {
     throw usage(`Expected --${name} to be an integer from ${minimum} to ${maximum}`);
@@ -1510,6 +1528,25 @@ function requireConnection(connectionId, label) {
 
 function requirePayloadValue(payload, key, message) {
   if (!payload[key]) throw usage(message);
+}
+
+function requireEvalBatchSuites(suiteIds) {
+  if (!Array.isArray(suiteIds) || suiteIds.length < 2 || suiteIds.length > 20) {
+    throw usage("evals runs create-batch requires 2 to 20 suite ids");
+  }
+  if (new Set(suiteIds.map(String)).size !== suiteIds.length) {
+    throw usage("evals runs create-batch requires distinct suite ids");
+  }
+}
+
+function normalizeEvalCaseConcurrency(payload) {
+  if (payload.case_concurrency === undefined) return;
+  payload.case_concurrency = parseBoundedInteger(
+    payload.case_concurrency,
+    "concurrency",
+    1,
+    8,
+  );
 }
 
 function csvOrRepeated(value) {
@@ -1583,10 +1620,13 @@ Data products:
   answerlayer inquiry models|ask|sessions|create-session|session|update-session|delete-session|turn
   answerlayer evals suites list|create|get|update|delete
   answerlayer evals cases create|update|delete
-  answerlayer evals runs list|create|get|update|cancel|compare
+  answerlayer evals runs list|create|create-batch|get|update|cancel|compare
     create accepts --case <case-id> (repeat or comma-separate),
     --concurrency <1-8> (default 3; 1 is serial), and
     --use-semantic-layer or --no-semantic-layer
+    create-batch accepts 2 to 20 suite ids as positionals or repeatable
+    --suite values, plus shared --label, --model, --concurrency <1-8>,
+    and --use-semantic-layer or --no-semantic-layer
     update accepts --label <name>
   answerlayer generation start|list|get|status|stream|cancel|questions|guidance|delete
   answerlayer tiles list|get|create|update|data|delete
