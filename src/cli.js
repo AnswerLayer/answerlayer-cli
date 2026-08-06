@@ -679,6 +679,12 @@ async function handleEvals(client, resource, positionals, parsed, io) {
         use_semantic_layer: semanticLayerMode(parsed.flags),
         baseline_run_id: firstValue(parsed.flags.baseline),
         case_ids: optionalCsvOrRepeated(parsed.flags.case),
+        case_concurrency: parseBoundedInteger(
+          firstValue(parsed.flags.concurrency),
+          "concurrency",
+          1,
+          8,
+        ),
       });
       requirePayloadValue(payload, "suite_id", "evals runs create requires a suite id or --suite");
       return requestAndPrint(client, "POST", `${base}/runs`, parsed, io, { body: payload });
@@ -1483,6 +1489,15 @@ function parseNumber(value, name) {
   return parsed;
 }
 
+function parseBoundedInteger(value, name, minimum, maximum) {
+  if (value === undefined || value === null || value === "") return undefined;
+  const parsed = Number(value);
+  if (!Number.isInteger(parsed) || parsed < minimum || parsed > maximum) {
+    throw usage(`Expected --${name} to be an integer from ${minimum} to ${maximum}`);
+  }
+  return parsed;
+}
+
 function requirePositional(positionals, index, label) {
   const value = positionals[index];
   if (!value) throw usage(`Missing ${label}`);
@@ -1569,7 +1584,8 @@ Data products:
   answerlayer evals suites list|create|get|update|delete
   answerlayer evals cases create|update|delete
   answerlayer evals runs list|create|get|update|cancel|compare
-    create accepts --case <case-id> (repeat or comma-separate), and
+    create accepts --case <case-id> (repeat or comma-separate),
+    --concurrency <1-8> (default 3; 1 is serial), and
     --use-semantic-layer or --no-semantic-layer
     update accepts --label <name>
   answerlayer generation start|list|get|status|stream|cancel|questions|guidance|delete

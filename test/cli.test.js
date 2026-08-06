@@ -726,6 +726,61 @@ test("evals runs create can disable the semantic layer", async () => {
   assert.deepEqual(JSON.parse(output.text()), { run_id: "run-1", status: "queued" });
 });
 
+test("evals runs create sends the case concurrency limit", async () => {
+  const originalFetch = globalThis.fetch;
+  const output = captureStream();
+
+  globalThis.fetch = async (url, init) => {
+    assert.equal(String(url), "https://answerlayer.example/api/v1/evals/runs");
+    assert.equal(init.method, "POST");
+    assert.deepEqual(JSON.parse(init.body), {
+      suite_id: "suite-1",
+      case_concurrency: 4,
+    });
+    return new Response(JSON.stringify({ run_id: "run-1", status: "queued" }), {
+      status: 202,
+      headers: { "content-type": "application/json" },
+    });
+  };
+
+  try {
+    await main([
+      "evals", "runs", "create", "suite-1",
+      "--base-url", "https://answerlayer.example",
+      "--api-key", "al_live_test",
+      "--concurrency", "4",
+    ], {
+      env: {},
+      stdin: readableStdin(),
+      stdout: output,
+      stderr: captureStream(),
+    });
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+
+  assert.deepEqual(JSON.parse(output.text()), { run_id: "run-1", status: "queued" });
+});
+
+test("evals runs create validates the case concurrency limit", async () => {
+  for (const concurrency of ["0", "9", "2.5", "many"]) {
+    await assert.rejects(
+      main([
+        "evals", "runs", "create", "suite-1",
+        "--base-url", "https://answerlayer.example",
+        "--api-key", "al_live_test",
+        "--concurrency", concurrency,
+      ], {
+        env: {},
+        stdin: readableStdin(),
+        stdout: captureStream(),
+        stderr: captureStream(),
+      }),
+      /Expected --concurrency to be an integer from 1 to 8/,
+    );
+  }
+});
+
 test("evals runs update renames a run", async () => {
   const originalFetch = globalThis.fetch;
   const output = captureStream();
