@@ -1,14 +1,16 @@
 name: Release
 
-# On every push to main, semantic-release derives the next version from commit
-# messages, publishes @answerlayer/cli to npm via Trusted Publishing (OIDC — no
-# token), and creates the git tag + GitHub Release. Provenance is automatic.
+# On every push to main, or when manually dispatched after an Actions incident,
+# semantic-release derives the next version from commit messages, publishes
+# @answerlayer/cli to npm via Trusted Publishing (OIDC — no token), and creates
+# the git tag + GitHub Release. Provenance is automatic.
 #
 # Bump policy (scripts/semantic-release-bump.js): everything defaults to a
 # patch; `feat(minor):` -> minor; `type!:` / BREAKING CHANGE -> major.
 on:
   push:
     branches: [main]
+  workflow_dispatch:
 
 concurrency:
   group: release
