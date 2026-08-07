@@ -739,9 +739,15 @@ async function handleEvals(client, resource, positionals, parsed, io) {
 async function handleGeneration(client, command, positionals, parsed, io) {
   const base = "/api/v1/semantic/jobs";
   if (command === "start" || command === "create") {
-    return requestAndPrint(client, "POST", base, parsed, io, {
+    const result = await client.rawRequest("POST", base, {
       body: await readData(parsed.flags, io),
     });
+    const jobId = result.data && result.data.id;
+    if (jobId) {
+      await kickJobWorker(client, `${base}/${encodeURIComponent(jobId)}/stream`);
+    }
+    write(io.stdout, formatJson(result.data));
+    return;
   }
   if (command === "list" || !command) {
     return requestAndPrint(client, "GET", base, parsed, io, {
@@ -1253,6 +1259,28 @@ async function readData(flags, io, defaults = {}) {
   }
 
   return dropUndefined({ ...defaults, ...data });
+}
+
+async function kickJobWorker(client, streamPath) {
+  // Backend only starts a queued generation job when something opens the SSE
+  // stream. Hit the stream just long enough for the server to dispatch the
+  // worker, then abort so the CLI returns promptly.
+  const controller = new AbortController();
+  const url = new URL(`${client.baseUrl}${streamPath}`);
+  const headers = { Accept: "text/event-stream", "User-Agent": "answerlayer-cli/0.1.0" };
+  if (client.apiKey) headers["X-API-Key"] = client.apiKey;
+  try {
+    const response = await client.fetchImpl(url, { method: "GET", headers, signal: controller.signal });
+    if (response.body && typeof response.body.getReader === "function") {
+      const reader = response.body.getReader();
+      await reader.read();
+      try { await reader.cancel(); } catch {}
+    }
+  } catch {
+    // Best-effort kick; ignore network/abort errors so create still succeeds.
+  } finally {
+    controller.abort();
+  }
 }
 
 function multipart({ file, fields = {} }) {
