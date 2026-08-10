@@ -10,7 +10,6 @@ import { defaultConfigPath, readConfig, writeConfig } from "./config.js";
 export const DEFAULT_LOCAL_IMAGE = "public.ecr.aws/s8d9x7y7/answerlayer:1.19.9";
 const DEFAULT_PORT = 8000;
 const MINIMUM_FREE_BYTES = 2 * 1024 * 1024 * 1024;
-const PROJECT_NAME = "answerlayer-local";
 
 export async function handleLocal(command, parsed, io) {
   if (command === "init") return localInit(parsed, io);
@@ -166,6 +165,7 @@ async function ensureInitialized(parsed, io) {
     requestedImage,
     resolvedImage,
     port,
+    ...runtimeResourceNames(runtime.directory),
     createdAt: existingState?.createdAt || new Date().toISOString(),
     updatedAt: new Date().toISOString(),
     lastStatus: existingState?.lastStatus || "stopped",
@@ -359,8 +359,8 @@ function writeEnvironment(envPath, state) {
     ANSWERLAYER_LOG_LEVEL: existing.ANSWERLAYER_LOG_LEVEL || "INFO",
     ANSWERLAYER_WEB_CONCURRENCY: existing.ANSWERLAYER_WEB_CONCURRENCY || "1",
     ANSWERLAYER_ANTHROPIC_API_KEY: existing.ANSWERLAYER_ANTHROPIC_API_KEY || "",
-    ANSWERLAYER_POSTGRES_VOLUME: existing.ANSWERLAYER_POSTGRES_VOLUME || "answerlayer-local-postgres-data",
-    ANSWERLAYER_NETWORK: existing.ANSWERLAYER_NETWORK || "answerlayer-local-network",
+    ANSWERLAYER_POSTGRES_VOLUME: state.postgresVolume,
+    ANSWERLAYER_NETWORK: state.networkName,
   };
   const contents = Object.entries(values).map(([name, value]) => `${name}=${value}`).join("\n");
   fs.writeFileSync(envPath, `${contents}\n`, { encoding: "utf8", mode: 0o600 });
@@ -393,10 +393,20 @@ function writeState(statePath, state) {
 
 function composeArgs(runtime) {
   return [
-    "compose", "--project-name", PROJECT_NAME,
+    "compose", "--project-name", runtime.state.projectName,
     "--file", runtime.composePath,
     "--env-file", runtime.envPath,
   ];
+}
+
+function runtimeResourceNames(directory) {
+  const id = crypto.createHash("sha256").update(path.resolve(directory)).digest("hex").slice(0, 12);
+  return {
+    runtimeId: id,
+    projectName: `answerlayer-local-${id}`,
+    postgresVolume: `answerlayer-local-${id}-postgres-data`,
+    networkName: `answerlayer-local-${id}-network`,
+  };
 }
 
 function parseBootstrapApiKey(stdout) {

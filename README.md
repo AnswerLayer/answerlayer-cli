@@ -139,6 +139,8 @@ answerlayer local reset --force         # permanently deletes local data
 The selected tag and resolved digest are recorded in `state.json` and displayed
 by `local status`. Set `ANSWERLAYER_LOCAL_DIR` to override the application-data
 directory or `ANSWERLAYER_LOCAL_IMAGE` to override the default image.
+Each runtime directory receives stable, isolated Compose project, volume, and
+network names, so stopping or resetting one runtime cannot affect another.
 
 Useful scopes:
 

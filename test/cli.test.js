@@ -220,6 +220,32 @@ test("local reset requires explicit confirmation and deletes only after --force"
   assert.match(fixture.output.text(), /Deleted the local AnswerLayer database volume/);
 });
 
+test("separate runtime directories use isolated Compose and persistent resource names", async () => {
+  const first = localFixture();
+  const second = localFixture();
+  await main(["local", "init"], first.io);
+  await main(["local", "init"], second.io);
+
+  const firstState = JSON.parse(fs.readFileSync(path.join(first.runtimeDir, "state.json"), "utf8"));
+  const secondState = JSON.parse(fs.readFileSync(path.join(second.runtimeDir, "state.json"), "utf8"));
+  assert.notEqual(firstState.runtimeId, secondState.runtimeId);
+  assert.notEqual(firstState.projectName, secondState.projectName);
+  assert.notEqual(firstState.postgresVolume, secondState.postgresVolume);
+  assert.notEqual(firstState.networkName, secondState.networkName);
+
+  const firstEnvironment = fs.readFileSync(path.join(first.runtimeDir, "runtime.env"), "utf8");
+  const secondEnvironment = fs.readFileSync(path.join(second.runtimeDir, "runtime.env"), "utf8");
+  assert.match(firstEnvironment, new RegExp(`ANSWERLAYER_POSTGRES_VOLUME=${firstState.postgresVolume}`));
+  assert.match(secondEnvironment, new RegExp(`ANSWERLAYER_POSTGRES_VOLUME=${secondState.postgresVolume}`));
+
+  first.commands.length = 0;
+  await main(["local", "reset", "--force"], first.io);
+  const resetCommand = first.commands.find(([, args]) => args.includes("--volumes"));
+  assert.ok(resetCommand);
+  assert.equal(resetCommand[1].includes(firstState.projectName), true);
+  assert.equal(resetCommand[1].includes(secondState.projectName), false);
+});
+
 test("local init rejects unsupported Docker versions and low disk space", async () => {
   const oldDocker = localFixture({ dockerVersion: "19.03.15" });
   await assert.rejects(main(["local", "init"], oldDocker.io), /Docker Engine 20.10 or newer/);
