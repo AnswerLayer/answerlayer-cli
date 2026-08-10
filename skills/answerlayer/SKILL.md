@@ -30,26 +30,28 @@ already available in the Codex skills directory.
    npm install -g @answerlayer/cli
    ```
 
-2. Ask the user to set their Anthropic key privately in their own terminal. Do
-   not ask them to paste it into chat or put it in shell history:
+2. After confirmation, initialize the repository-free local runtime:
 
    ```bash
-   read -s ANTHROPIC_API_KEY && export ANTHROPIC_API_KEY
+   answerlayer local init
    ```
 
-3. After confirmation, run the complete local setup:
+   This checks Docker, pulls the supported public AnswerLayer image, pins its
+   immutable digest, and generates permission-restricted runtime configuration
+   in the platform application-data directory. It does not require Git, a
+   source checkout, registry credentials, or a model-provider key.
+
+3. After confirmation, start and configure the stack:
 
    ```bash
-   answerlayer local up
+   answerlayer local start
    ```
 
-   This verifies Git and Docker, clones the core stack to
-   `~/.answerlayer/core` when needed, creates a permission-restricted `.env`
-   with a generated encryption key, starts Docker Compose, waits for health,
-   creates the local identity and scoped key, verifies it, and configures the
-   CLI. It captures the one-time key rather than printing it. Use
-   `--stack-dir <directory>` to reuse a different core checkout; when that
-   checkout already has a `.env`, `ANTHROPIC_API_KEY` need not be exported.
+   This starts Postgres, runs migrations, waits for readiness, creates the local
+   identity and scoped key, verifies it, and configures the CLI. It captures the
+   one-time key rather than printing it. Use `answerlayer local status` and
+   `answerlayer local logs` to inspect progress. `local stop` preserves data;
+   `local reset --force` is the explicit destructive reset.
 
 4. Before connecting real data, require a dedicated database account that is
    restricted to approved schemas and `SELECT` only. Show the proposed

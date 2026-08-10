@@ -5,7 +5,7 @@ import { fileURLToPath } from "node:url";
 import { AnswerLayerClient } from "./client.js";
 import { formatJson, formatList, formatQueryResult } from "./format.js";
 import { DEFAULT_BASE_URL, readConfig, resolveAuth, writeConfig } from "./config.js";
-import { localUp } from "./local.js";
+import { handleLocal } from "./local.js";
 
 const SEMANTIC_RESOURCES = new Set([
   "entities",
@@ -38,8 +38,7 @@ export async function main(argv, io) {
   }
 
   if (group === "local") {
-    if (command !== "up") throw usage("Expected `answerlayer local up`");
-    return localUp(parsed, io);
+    return handleLocal(command, parsed, io);
   }
 
   const { baseUrl, apiKey } = resolveAuth(parsed.flags, io.env);
@@ -1471,14 +1470,13 @@ function normalizeFlagName(rawName) {
     "--relationship-type": "relationshipType",
     "--join": "join",
     "--form": "form",
-    "--stack-dir": "stackDir",
   };
 
   return aliases[rawName] || rawName.replace(/^-+/, "").replace(/-([a-z])/g, (_, letter) => letter.toUpperCase());
 }
 
 function isBooleanFlag(rawName) {
-  return ["--json", "--help", "-h", "--include", "-i", "--raw", "--admin", "--force", "--active", "--inactive", "--include-inactive", "--include-semantic-snapshot", "--use-semantic-layer", "--no-semantic-layer"].includes(rawName);
+  return ["--json", "--help", "-h", "--include", "-i", "--raw", "--admin", "--force", "--follow", "--active", "--inactive", "--include-inactive", "--include-semantic-snapshot", "--use-semantic-layer", "--no-semantic-layer"].includes(rawName);
 }
 
 function setFlag(flags, name, value) {
@@ -1615,7 +1613,10 @@ function helpText() {
 
 Usage:
   answerlayer skills install [--path <directory>] [--force]
-  answerlayer local up [--stack-dir <directory>]
+  answerlayer local init [--image <image>] [--port <port>]
+  answerlayer local start|status|logs|stop
+  answerlayer local upgrade [--image <image>]
+  answerlayer local reset --force
   answerlayer init --api-key <key> [--base-url <url>]
   answerlayer configure --base-url <url> --api-key <key>
   answerlayer health

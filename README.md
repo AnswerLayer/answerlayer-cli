@@ -97,30 +97,48 @@ This installs to `~/.codex/skills/answerlayer` by default. Use `--path` for a
 different skill directory; an existing skill is never replaced unless you pass
 `--force`.
 
-Set the model-provider key privately, then let the CLI prepare the stack and
-configure itself:
+Initialize and start the local runtime:
 
 ```bash
-read -s ANTHROPIC_API_KEY && export ANTHROPIC_API_KEY
-answerlayer local up
+answerlayer local init
+answerlayer local start
 ```
 
-Use `--stack-dir <directory>` to reuse a different core checkout. If that
-checkout already has a `.env`, the provider key does not need to be exported.
-The command:
+`local init` selects the CLI's supported public image by default. Use
+`--image <tag-or-digest>` to select a different published version and `--port`
+to change the local port. The CLI:
 
-1. Verifies Git and Docker and clones `answerlayer-core` when needed.
-2. Creates a permission-restricted `.env` and generates its encryption key.
-3. Starts Docker Compose and waits for the API to become healthy.
-4. Creates a local-only organization and scoped key, verifies the key, and
+1. Verifies Docker, its architecture and version, the port, and available disk.
+2. Pulls the public AnswerLayer image and pins its resolved immutable digest.
+3. Generates permission-restricted Compose, state, and secret files in the
+   platform application-data directory.
+4. Starts Postgres, runs migrations, and waits for AnswerLayer readiness.
+5. Creates a local-only organization and scoped key, verifies the key, and
    saves the CLI configuration without printing the key.
-5. Leaves you ready to connect a dedicated, read-only database user and test a
+6. Leaves you ready to connect a dedicated, read-only database user and test a
    small, approved schema first.
 
-The local stack never needs a hosted AnswerLayer account. The skill requires
-agent confirmation before it starts containers, creates a connection, or sends
-queries to a real database, and it instructs agents not to print or persist
-database passwords.
+The local stack does not require a hosted AnswerLayer account, a source checkout,
+private registry credentials, or a model-provider key for first boot. Add an
+optional provider key later only when using features that call that provider.
+The skill requires agent confirmation before it starts containers, creates a
+connection, or sends queries to a real database, and it instructs agents not to
+print or persist database passwords.
+
+Inspect and manage the lifecycle with:
+
+```bash
+answerlayer local status [--json]
+answerlayer local logs [--follow] [answerlayer|migrate|postgres]
+answerlayer local stop                  # preserves Postgres data
+answerlayer local upgrade               # moves to this CLI's supported default
+answerlayer local upgrade --image <tag> # selects an explicit release
+answerlayer local reset --force         # permanently deletes local data
+```
+
+The selected tag and resolved digest are recorded in `state.json` and displayed
+by `local status`. Set `ANSWERLAYER_LOCAL_DIR` to override the application-data
+directory or `ANSWERLAYER_LOCAL_IMAGE` to override the default image.
 
 Useful scopes:
 
@@ -138,7 +156,11 @@ Useful scopes:
 ```bash
 answerlayer health
 answerlayer openapi --output openapi.json
-answerlayer local up
+answerlayer local init
+answerlayer local start
+answerlayer local status
+answerlayer local logs
+answerlayer local stop
 
 answerlayer connections list
 answerlayer connections get <connection-id>

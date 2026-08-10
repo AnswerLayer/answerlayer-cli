@@ -147,193 +147,85 @@ test("init requires an explicit API key instead of reusing saved credentials", a
   assert.deepEqual(JSON.parse(fs.readFileSync(configPath, "utf8")), originalConfig);
 });
 
-test("local up clones, starts, bootstraps, verifies, and configures the local stack", async () => {
-  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "al-cli-local-"));
-  const stackDir = path.join(tempDir, "core");
-  const configPath = path.join(tempDir, "config.json");
-  const commands = [];
-  const output = captureStream();
+test("local init pulls the public image and pins its digest without Git or provider credentials", async () => {
+  const fixture = localFixture();
 
-  const runCommand = (command, args, options) => {
-    commands.push([command, args, options]);
-    if (command === "git" && args[0] === "clone") {
-      fs.mkdirSync(path.join(stackDir, ".git"), { recursive: true });
-      fs.mkdirSync(path.join(stackDir, "backend/app/scripts"), { recursive: true });
-      fs.writeFileSync(path.join(stackDir, "docker-compose.yml"), "services: {}\n");
-      fs.writeFileSync(path.join(stackDir, "Makefile"), "local-bootstrap:\n\t@true\n");
-      fs.writeFileSync(path.join(stackDir, "backend/app/scripts/bootstrap_local.py"), "# local bootstrap\n");
-      fs.writeFileSync(
-        path.join(stackDir, ".env.example"),
-        "ANTHROPIC_API_KEY=placeholder\nENCRYPTION_KEY=placeholder\n",
-      );
-    }
-    if (command === "git" && args.includes("get-url")) {
-      return { status: 0, stdout: "git@github.com:AnswerLayer/answerlayer-core.git\n", stderr: "" };
-    }
-    if (command === "docker" && args.includes("port")) {
-      return { status: 0, stdout: "[::1]:49152\n", stderr: "" };
-    }
-    if (command === "make") {
-      return {
-        status: 0,
-        stdout: "answerlayer init --api-key al_local_secret --base-url http://localhost:8000\n",
-        stderr: "",
-      };
-    }
-    return { status: 0, stdout: "", stderr: "" };
-  };
+  await main(["local", "init"], fixture.io);
 
-  const fetchImpl = async (url, init = {}) => {
-    if (String(url).endsWith("/healthz")) return new Response("ok");
-    assert.equal(String(url), "http://[::1]:49152/api/v1/auth/me");
-    assert.equal(init.headers["X-API-Key"], "al_local_secret");
-    return new Response(JSON.stringify({ email: "local@answerlayer.test" }), {
-      headers: { "content-type": "application/json" },
-    });
-  };
+  const state = JSON.parse(fs.readFileSync(path.join(fixture.runtimeDir, "state.json"), "utf8"));
+  assert.equal(state.requestedImage, "public.ecr.aws/s8d9x7y7/answerlayer:1.19.9");
+  assert.equal(state.resolvedImage, fixture.resolvedImage);
+  assert.equal(fs.statSync(path.join(fixture.runtimeDir, "runtime.env")).mode & 0o777, 0o600);
+  assert.match(fs.readFileSync(path.join(fixture.runtimeDir, "runtime.env"), "utf8"), new RegExp(`ANSWERLAYER_IMAGE=${fixture.resolvedImage}`));
+  assert.match(fs.readFileSync(path.join(fixture.runtimeDir, "compose.yaml"), "utf8"), /service_completed_successfully/);
+  assert.equal(fixture.commands.some(([command]) => command === "git" || command === "make"), false);
+  assert.match(fixture.output.text(), /Local AnswerLayer is initialized/);
+});
 
-  await main(["local", "up", "--stack-dir", stackDir], {
-    env: { ANTHROPIC_API_KEY: "sk-ant-local", ANSWERLAYER_CONFIG: configPath },
-    stdin: readableStdin(),
-    stdout: output,
-    stderr: captureStream(),
-    runCommand,
-    fetch: fetchImpl,
-    sleep: async () => {},
-  });
+test("local start reuses initialized state, starts the image stack, and configures local credentials", async () => {
+  const fixture = localFixture();
+  await main(["local", "init"], fixture.io);
+  fixture.commands.length = 0;
 
-  assert.deepEqual(commands.map(([command, args]) => [command, ...args]), [
-    ["git", "--version"],
-    ["docker", "compose", "version"],
-    ["git", "clone", "--depth", "1", "https://github.com/AnswerLayer/answerlayer-core.git", stackDir],
-    ["git", "-C", stackDir, "remote", "get-url", "origin"],
-    ["docker", "compose", "up", "--build", "-d"],
-    ["docker", "compose", "port", "answerlayer", "8000"],
-    ["make", "local-bootstrap"],
-  ]);
-  assert.deepEqual(JSON.parse(fs.readFileSync(configPath, "utf8")), {
-    baseUrl: "http://[::1]:49152",
+  await main(["local", "start"], fixture.io);
+
+  assert.equal(fixture.commands.some(([, args]) => args[0] === "pull"), false);
+  assert.equal(fixture.commands.some(([, args]) => args.includes("up") && args.includes("--wait")), true);
+  assert.equal(fixture.commands.some(([, args]) => args.includes("app.scripts.bootstrap_local")), true);
+  assert.deepEqual(JSON.parse(fs.readFileSync(fixture.configPath, "utf8")), {
+    baseUrl: "http://127.0.0.1:8000",
     apiKey: "al_local_secret",
   });
-  assert.equal(fs.statSync(path.join(stackDir, ".env")).mode & 0o777, 0o600);
-  assert.match(fs.readFileSync(path.join(stackDir, ".env"), "utf8"), /ANTHROPIC_API_KEY=sk-ant-local/);
-  assert.doesNotMatch(output.text(), /al_local_secret/);
-  assert.match(output.text(), /Local AnswerLayer is ready/);
+  assert.doesNotMatch(fixture.output.text(), /al_local_secret/);
+  assert.match(fixture.output.text(), /Local AnswerLayer is ready/);
 });
 
-test("local up preserves the rotated key when verification fails", async () => {
-  const stackDir = createCoreCheckout();
-  const configPath = path.join(path.dirname(stackDir), "config.json");
-  fs.writeFileSync(path.join(stackDir, ".env"), "ANTHROPIC_API_KEY=local\n");
-  fs.writeFileSync(configPath, `${JSON.stringify({
-    baseUrl: "http://127.0.0.1:8000",
-    apiKey: "al_local_revoked",
-  })}\n`);
-
-  const runCommand = (command, args) => {
-    if (command === "git" && args.includes("get-url")) {
-      return { status: 0, stdout: "https://github.com/AnswerLayer/answerlayer-core.git\n", stderr: "" };
-    }
-    if (command === "docker" && args.includes("port")) {
-      return { status: 0, stdout: "127.0.0.1:49152\n", stderr: "" };
-    }
-    if (command === "make") {
-      return {
-        status: 0,
-        stdout: "answerlayer init --api-key al_local_replacement --base-url http://localhost:8000\n",
-        stderr: "",
-      };
-    }
-    return { status: 0, stdout: "", stderr: "" };
-  };
-
-  await assert.rejects(
-    main(["local", "up", "--stack-dir", stackDir], {
-      env: { ANSWERLAYER_CONFIG: configPath },
-      stdin: readableStdin(),
-      stdout: captureStream(),
-      stderr: captureStream(),
-      runCommand,
-      fetch: async (url) => {
-        if (String(url).endsWith("/healthz")) return new Response("ok");
-        throw new Error("temporary network failure");
-      },
-      sleep: async () => {},
-    }),
-    /Saved rotated local credentials .* verification failed: temporary network failure/,
-  );
-
-  assert.deepEqual(JSON.parse(fs.readFileSync(configPath, "utf8")), {
-    baseUrl: "http://127.0.0.1:49152",
-    apiKey: "al_local_replacement",
-  });
+test("local up is an image-based spelling of local start", async () => {
+  const fixture = localFixture();
+  await main(["local", "up"], fixture.io);
+  assert.equal(fixture.commands.some(([command]) => command === "git"), false);
+  assert.equal(fixture.commands.some(([, args]) => args[0] === "pull"), true);
+  assert.equal(fixture.commands.some(([, args]) => args.includes("up") && args.includes("--wait")), true);
 });
 
-test("local up requires the provider key before creating a new checkout", async () => {
-  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "al-cli-local-"));
-  const stackDir = path.join(tempDir, "core");
-  const commands = [];
+test("local status distinguishes migration and exposes the pinned image", async () => {
+  const fixture = localFixture();
+  await main(["local", "init"], fixture.io);
+  fixture.psOutput = JSON.stringify({ Service: "migrate", State: "running", Health: "", ExitCode: 0 });
+  fixture.output.clear();
 
-  await assert.rejects(
-    main(["local", "up", "--stack-dir", stackDir], {
-      env: {},
-      stdin: readableStdin(),
-      stdout: captureStream(),
-      stderr: captureStream(),
-      runCommand(command, args) {
-        commands.push([command, ...args]);
-        return { status: 0, stdout: "", stderr: "" };
-      },
-    }),
-    /Set ANTHROPIC_API_KEY/,
-  );
+  await main(["local", "status", "--json"], fixture.io);
 
-  assert.equal(fs.existsSync(stackDir), false);
-  assert.deepEqual(commands, [["git", "--version"], ["docker", "compose", "version"]]);
+  const status = JSON.parse(fixture.output.text());
+  assert.equal(status.status, "migrating");
+  assert.equal(status.resolvedImage, fixture.resolvedImage);
 });
 
-test("local up rejects an existing checkout with a non-AnswerLayer origin", async () => {
-  const stackDir = createCoreCheckout();
-  fs.writeFileSync(path.join(stackDir, ".env"), "ANTHROPIC_API_KEY=local\n");
+test("local start reports an occupied port before starting containers", async () => {
+  const fixture = localFixture({ portIsAvailable: false });
+  await main(["local", "init"], fixture.io);
 
-  await assert.rejects(
-    main(["local", "up", "--stack-dir", stackDir], {
-      env: {},
-      stdin: readableStdin(),
-      stdout: captureStream(),
-      stderr: captureStream(),
-      runCommand(command, args) {
-        if (command === "git" && args.includes("get-url")) {
-          return { status: 0, stdout: "https://github.com/example/another-repo.git\n", stderr: "" };
-        }
-        return { status: 0, stdout: "", stderr: "" };
-      },
-    }),
-    /does not use the official AnswerLayer core origin/,
-  );
+  await assert.rejects(main(["local", "start"], fixture.io), /Port 8000 is already in use/);
+  assert.equal(fixture.commands.some(([, args]) => args.includes("up") && args.includes("--wait")), false);
 });
 
-test("local up refuses to create an environment from an incompatible template", async () => {
-  const stackDir = createCoreCheckout();
-  fs.writeFileSync(path.join(stackDir, ".env.example"), "ANTHROPIC_API_KEY=placeholder\n");
+test("local reset requires explicit confirmation and deletes only after --force", async () => {
+  const fixture = localFixture();
+  await main(["local", "init"], fixture.io);
 
-  await assert.rejects(
-    main(["local", "up", "--stack-dir", stackDir], {
-      env: { ANTHROPIC_API_KEY: "sk-ant-local" },
-      stdin: readableStdin(),
-      stdout: captureStream(),
-      stderr: captureStream(),
-      runCommand(command, args) {
-        if (command === "git" && args.includes("get-url")) {
-          return { status: 0, stdout: "https://github.com/AnswerLayer/answerlayer-core.git\n", stderr: "" };
-        }
-        return { status: 0, stdout: "", stderr: "" };
-      },
-    }),
-    /must contain exactly one ENCRYPTION_KEY= entry/,
-  );
+  await assert.rejects(main(["local", "reset"], fixture.io), /reset --force/);
+  await main(["local", "reset", "--force"], fixture.io);
 
-  assert.equal(fs.existsSync(path.join(stackDir, ".env")), false);
+  assert.equal(fixture.commands.some(([, args]) => args.includes("down") && args.includes("--volumes")), true);
+  assert.match(fixture.output.text(), /Deleted the local AnswerLayer database volume/);
+});
+
+test("local init rejects unsupported Docker versions and low disk space", async () => {
+  const oldDocker = localFixture({ dockerVersion: "19.03.15" });
+  await assert.rejects(main(["local", "init"], oldDocker.io), /Docker Engine 20.10 or newer/);
+
+  const lowDisk = localFixture({ availableBytes: 1024 });
+  await assert.rejects(main(["local", "init"], lowDisk.io), /at least 2 GB/);
 });
 
 test("defaults the base URL to the hosted SaaS when none is configured", async () => {
@@ -1076,15 +968,57 @@ function readableStdin() {
   return stream;
 }
 
-function createCoreCheckout() {
-  const stackDir = fs.mkdtempSync(path.join(os.tmpdir(), "al-cli-core-"));
-  fs.mkdirSync(path.join(stackDir, ".git"));
-  fs.mkdirSync(path.join(stackDir, "backend/app/scripts"), { recursive: true });
-  fs.writeFileSync(path.join(stackDir, "docker-compose.yml"), "services: {}\n");
-  fs.writeFileSync(path.join(stackDir, ".env.example"), "ANTHROPIC_API_KEY=x\nENCRYPTION_KEY=x\n");
-  fs.writeFileSync(path.join(stackDir, "Makefile"), "local-bootstrap:\n\t@true\n");
-  fs.writeFileSync(path.join(stackDir, "backend/app/scripts/bootstrap_local.py"), "# local bootstrap\n");
-  return stackDir;
+function localFixture(options = {}) {
+  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "al-cli-local-"));
+  const runtimeDir = path.join(tempDir, "runtime");
+  const configPath = path.join(tempDir, "config.json");
+  const output = captureStream();
+  const commands = [];
+  const resolvedImage = "public.ecr.aws/s8d9x7y7/answerlayer@sha256:abc123";
+  const fixture = { tempDir, runtimeDir, configPath, output, commands, resolvedImage, psOutput: "" };
+
+  fixture.io = {
+    env: { ANSWERLAYER_LOCAL_DIR: runtimeDir, ANSWERLAYER_CONFIG: configPath },
+    stdin: readableStdin(),
+    stdout: output,
+    stderr: captureStream(),
+    availableBytes: options.availableBytes ?? 10 * 1024 * 1024 * 1024,
+    portIsAvailable: () => options.portIsAvailable ?? true,
+    sleep: async () => {},
+    fetch: async (url, init = {}) => {
+      if (String(url).endsWith("/readyz")) return new Response(JSON.stringify({ status: "ready" }));
+      assert.equal(String(url), "http://127.0.0.1:8000/api/v1/auth/me");
+      assert.equal(init.headers["X-API-Key"], "al_local_secret");
+      return new Response(JSON.stringify({ email: "local@answerlayer.test" }), {
+        headers: { "content-type": "application/json" },
+      });
+    },
+    runCommand(command, args, commandOptions) {
+      commands.push([command, args, commandOptions]);
+      if (args[0] === "version" && args.includes("--format")) {
+        return { status: 0, stdout: `${options.dockerVersion || "27.3.1"}\n`, stderr: "" };
+      }
+      if (args[0] === "compose" && args[1] === "version" && args.includes("--short")) {
+        return { status: 0, stdout: "2.32.4\n", stderr: "" };
+      }
+      if (args[0] === "info") return { status: 0, stdout: "linux/amd64\n", stderr: "" };
+      if (args[0] === "image" && args[1] === "inspect") {
+        return { status: 0, stdout: `${JSON.stringify([resolvedImage])}\n`, stderr: "" };
+      }
+      if (args.includes("ps") && args.includes("--format")) {
+        return { status: 0, stdout: `${fixture.psOutput}\n`, stderr: "" };
+      }
+      if (args.includes("app.scripts.bootstrap_local")) {
+        return {
+          status: 0,
+          stdout: "answerlayer init --base-url http://localhost:8000 --api-key al_local_secret\n",
+          stderr: "",
+        };
+      }
+      return { status: 0, stdout: "", stderr: "" };
+    },
+  };
+  return fixture;
 }
 
 function captureStream() {
@@ -1096,5 +1030,6 @@ function captureStream() {
     },
   });
   stream.text = () => body;
+  stream.clear = () => { body = ""; };
   return stream;
 }
