@@ -10,6 +10,16 @@ import { defaultConfigPath, readConfig, writeConfig } from "./config.js";
 export const DEFAULT_LOCAL_IMAGE = "public.ecr.aws/s8d9x7y7/answerlayer:1.19.9";
 const DEFAULT_PORT = 8000;
 const MINIMUM_FREE_BYTES = 2 * 1024 * 1024 * 1024;
+const LOCAL_DEMO_VERSION = "retail-v1";
+const LOCAL_DEMO_CONNECTION_NAME = "AnswerLayer Demo";
+const LOCAL_DEMO_SAVED_QUERY_NAME = "Monthly revenue by region";
+const LOCAL_DEMO_DATABASE = "answerlayer_demo";
+const LOCAL_DEMO_USER = "answerlayer_demo_reader";
+const LOCAL_DEMO_QUESTIONS = [
+  "How much completed revenue did we generate each month?",
+  "Which region generated the most completed revenue?",
+  "How did completed revenue change from January to March?",
+];
 
 export async function handleLocal(command, parsed, io) {
   if (command === "init") return localInit(parsed, io);
@@ -17,9 +27,10 @@ export async function handleLocal(command, parsed, io) {
   if (command === "status") return localStatus(parsed, io);
   if (command === "logs") return localLogs(parsed, io);
   if (command === "stop") return localStop(parsed, io);
+  if (command === "demo") return localDemo(parsed, io);
   if (command === "upgrade") return localUpgrade(parsed, io);
   if (command === "reset") return localReset(parsed, io);
-  throw new Error("Expected `answerlayer local init|start|status|logs|stop|upgrade|reset`");
+  throw new Error("Expected `answerlayer local init|start|status|logs|stop|demo|upgrade|reset`");
 }
 
 export async function localUp(parsed, io) {
@@ -57,12 +68,46 @@ async function localStart(parsed, io) {
   const baseUrl = `http://127.0.0.1:${runtime.state.port}`;
   await waitUntilReady(baseUrl, io);
   const configPath = await ensureLocalCredentials(runtime, baseUrl, io);
-  const state = { ...runtime.state, lastStatus: "ready", updatedAt: new Date().toISOString() };
+  const demo = parsed.flags.noDemo
+    ? { status: "skipped", version: LOCAL_DEMO_VERSION }
+    : await ensureLocalDemo(runtime, baseUrl, io);
+  const state = { ...runtime.state, demo, lastStatus: "ready", updatedAt: new Date().toISOString() };
   writeState(runtime.statePath, state);
 
   printRuntimeSummary({ ...runtime, state }, io, "Local AnswerLayer is ready.");
   write(io.stdout, `CLI config: ${configPath}\n`);
-  write(io.stdout, "Next: answerlayer connections list\n");
+  if (demo.status === "ready") {
+    printDemoSummary(demo, io);
+  } else {
+    write(io.stdout, "Demo: skipped (--no-demo)\n");
+    write(io.stdout, "Install it later with: answerlayer local demo\n");
+  }
+}
+
+async function localDemo(parsed, io) {
+  const run = io.runCommand || runCommand;
+  const runtime = loadRuntime(parsed, io);
+  requireCommand(run, "docker", ["compose", "version"]);
+  const status = inspectStatus(runtime, run, { tolerateFailure: true });
+  if (status.status !== "ready") {
+    throw new Error("Local AnswerLayer must be ready before installing the demo. Run `answerlayer local start` first.");
+  }
+
+  const baseUrl = `http://127.0.0.1:${runtime.state.port}`;
+  await ensureLocalCredentials(runtime, baseUrl, io, { quiet: Boolean(parsed.flags.json) });
+  const demo = await ensureLocalDemo(runtime, baseUrl, io, { quiet: Boolean(parsed.flags.json) });
+  writeState(runtime.statePath, {
+    ...runtime.state,
+    demo,
+    lastStatus: "ready",
+    updatedAt: new Date().toISOString(),
+  });
+
+  if (parsed.flags.json) {
+    write(io.stdout, `${JSON.stringify(demo, null, 2)}\n`);
+    return;
+  }
+  printDemoSummary(demo, io);
 }
 
 async function localUpgrade(parsed, io) {
@@ -82,6 +127,7 @@ async function localStatus(parsed, io) {
     image: runtime.state.requestedImage,
     resolvedImage: runtime.state.resolvedImage,
     runtimeDirectory: runtime.directory,
+    demo: runtime.state.demo || { status: "not-installed", version: LOCAL_DEMO_VERSION },
     services: status.services,
   };
 
@@ -93,6 +139,7 @@ async function localStatus(parsed, io) {
   write(io.stdout, `URL: ${result.url}\n`);
   write(io.stdout, `Image: ${result.resolvedImage}\n`);
   write(io.stdout, `Runtime config: ${result.runtimeDirectory}\n`);
+  write(io.stdout, `Demo: ${result.demo.status} (${result.demo.version})\n`);
 }
 
 async function localLogs(parsed, io) {
@@ -127,7 +174,12 @@ async function localReset(parsed, io) {
   const runtime = loadRuntime(parsed, io);
   requireCommand(run, "docker", ["compose", "version"]);
   checked(run, "docker", [...composeArgs(runtime), "down", "--volumes", "--remove-orphans"], { passthrough: true });
-  writeState(runtime.statePath, { ...runtime.state, lastStatus: "stopped", resetAt: new Date().toISOString() });
+  writeState(runtime.statePath, {
+    ...runtime.state,
+    demo: { status: "not-installed", version: LOCAL_DEMO_VERSION },
+    lastStatus: "stopped",
+    resetAt: new Date().toISOString(),
+  });
   write(io.stdout, "Deleted the local AnswerLayer database volume. Runtime configuration was preserved.\n");
   write(io.stdout, "Create a fresh database with: answerlayer local start\n");
 }
@@ -232,7 +284,7 @@ function imageRepository(image) {
   return colon > slash ? withoutDigest.slice(0, colon) : withoutDigest;
 }
 
-async function ensureLocalCredentials(runtime, baseUrl, io) {
+async function ensureLocalCredentials(runtime, baseUrl, io, options = {}) {
   const existing = readConfig(io.env);
   const fetchImpl = io.fetch || globalThis.fetch;
   if (existing.baseUrl === baseUrl && existing.apiKey) {
@@ -245,7 +297,9 @@ async function ensureLocalCredentials(runtime, baseUrl, io) {
     }
   }
 
-  write(io.stdout, "Creating a local-only CLI identity...\n");
+  if (!options.quiet) {
+    write(io.stdout, "Creating a local-only CLI identity...\n");
+  }
   const run = io.runCommand || runCommand;
   let bootstrap;
   try {
@@ -355,6 +409,7 @@ function writeEnvironment(envPath, state) {
     ANSWERLAYER_IMAGE: state.resolvedImage,
     ANSWERLAYER_POSTGRES_PASSWORD: existing.ANSWERLAYER_POSTGRES_PASSWORD || crypto.randomBytes(24).toString("hex"),
     ANSWERLAYER_ENCRYPTION_KEY: existing.ANSWERLAYER_ENCRYPTION_KEY || crypto.randomBytes(32).toString("hex"),
+    ANSWERLAYER_DEMO_PASSWORD: existing.ANSWERLAYER_DEMO_PASSWORD || crypto.randomBytes(24).toString("hex"),
     ANSWERLAYER_PORT: String(state.port),
     ANSWERLAYER_LOG_LEVEL: existing.ANSWERLAYER_LOG_LEVEL || "INFO",
     ANSWERLAYER_WEB_CONCURRENCY: existing.ANSWERLAYER_WEB_CONCURRENCY || "1",
@@ -447,7 +502,7 @@ function requireCommand(run, command, args) {
 }
 
 function checked(run, command, args, options = {}) {
-  const result = run(command, args, { capture: !options.passthrough });
+  const result = run(command, args, { capture: !options.passthrough, input: options.input });
   if (result.error) throw result.error;
   if (result.status !== 0) {
     const detail = String(result.stderr || result.stdout || "").trim();
@@ -459,7 +514,10 @@ function checked(run, command, args, options = {}) {
 function runCommand(command, args, options = {}) {
   return spawnSync(command, args, {
     encoding: options.capture ? "utf8" : undefined,
-    stdio: options.capture ? ["ignore", "pipe", "pipe"] : "inherit",
+    input: options.input,
+    stdio: options.capture
+      ? [options.input === undefined ? "ignore" : "pipe", "pipe", "pipe"]
+      : "inherit",
     maxBuffer: 50 * 1024 * 1024,
   });
 }
@@ -471,6 +529,279 @@ function printRuntimeSummary(runtime, io, heading) {
   write(io.stdout, `Resolved image: ${runtime.state.resolvedImage}\n`);
   write(io.stdout, `Runtime config: ${runtime.directory}\n`);
 }
+
+function printDemoSummary(demo, io) {
+  write(io.stdout, `Demo: ready (${demo.version})\n`);
+  write(io.stdout, `Demo connection: ${demo.connectionId}\n`);
+  write(io.stdout, `Verified result: ${demo.validation.completedOrderCount} completed orders, $${demo.validation.totalRevenue} revenue\n`);
+  write(io.stdout, `Try now: answerlayer saved-queries execute ${demo.savedQueryId} --format table\n`);
+  write(io.stdout, `After configuring a model provider, ask: answerlayer inquiry ask --connection ${demo.connectionId} "${demo.questions[0]}"\n`);
+}
+
+async function ensureLocalDemo(runtime, baseUrl, io, options = {}) {
+  const environment = readEnvironment(runtime.envPath);
+  const demoPassword = environment.ANSWERLAYER_DEMO_PASSWORD;
+  if (!demoPassword || !/^[a-f0-9]{48}$/.test(demoPassword)) {
+    throw new Error("The local demo password is missing or invalid. Run `answerlayer local init` to repair runtime configuration.");
+  }
+
+  const run = io.runCommand || runCommand;
+  if (!options.quiet) {
+    write(io.stdout, `Preparing deterministic demo data (${LOCAL_DEMO_VERSION})...\n`);
+  }
+  checked(run, "docker", [
+    ...composeArgs(runtime),
+    "exec", "-T", "postgres", "psql",
+    "--set", "ON_ERROR_STOP=1",
+    "--username", "answerlayer",
+    "--dbname", "postgres",
+  ], { input: demoSeedSql(demoPassword) });
+
+  const config = readConfig(io.env);
+  if (config.baseUrl !== baseUrl || !config.apiKey) {
+    throw new Error("Local CLI credentials are not configured. Run `answerlayer local start` first.");
+  }
+  const client = new AnswerLayerClient({ baseUrl, apiKey: config.apiKey, fetchImpl: io.fetch || globalThis.fetch });
+
+  const connection = await ensureDemoConnection(client, demoPassword);
+  const connectionId = String(connection.id);
+  const entities = [
+    await ensureSemanticResource(client, "entities", connectionId, "Orders", {
+      name: "Orders",
+      source_table: "demo.orders",
+      identifier: "id",
+      temporal_key: "order_date",
+      description: "Completed and refunded retail orders in the AnswerLayer onboarding demo.",
+    }),
+    await ensureSemanticResource(client, "entities", connectionId, "Customers", {
+      name: "Customers",
+      source_table: "demo.customers",
+      identifier: "id",
+      description: "Synthetic customers grouped by region and business segment.",
+    }),
+  ];
+  const relationship = await ensureSemanticResource(client, "relationships", connectionId, "Orders to Customers", {
+    name: "Orders to Customers",
+    description: "Each order belongs to one customer.",
+    from_entity: "Orders",
+    to_entity: "Customers",
+    join_keys: { from: "customer_id", to: "id" },
+    cardinality: "many_to_one",
+  });
+  const dimensions = [
+    await ensureSemanticResource(client, "dimensions", connectionId, "Order date", {
+      name: "Order date",
+      entity: "Orders",
+      expression: "order_date",
+      description: "Calendar date on which the order was placed.",
+    }),
+    await ensureSemanticResource(client, "dimensions", connectionId, "Customer region", {
+      name: "Customer region",
+      entity: "Customers",
+      expression: "region",
+      description: "North, South, East, or West sales region.",
+    }),
+  ];
+  const measure = await ensureSemanticResource(client, "measures", connectionId, "Revenue", {
+    name: "Revenue",
+    entity: "Orders",
+    expression: "quantity * unit_price",
+    aggregation: "sum",
+    default_filters: [],
+    description: "Gross order value before refunds; use order status to select completed revenue.",
+  });
+  const savedQuery = await ensureDemoSavedQuery(client, connectionId);
+  const queryResult = await client.runQuery(connectionId, {
+    query: DEMO_VALIDATION_SQL,
+    row_limit: 1,
+    timeout: 30,
+  });
+  const completedOrderCount = Number(queryResult?.rows?.[0]?.[0]);
+  const totalRevenue = Number(queryResult?.rows?.[0]?.[1]);
+  if (completedOrderCount !== 11 || totalRevenue !== 12200) {
+    throw new Error(
+      `Demo verification returned an unexpected result (${completedOrderCount} orders, ${totalRevenue} revenue). Run \`answerlayer local demo\` to retry.`,
+    );
+  }
+
+  return {
+    status: "ready",
+    version: LOCAL_DEMO_VERSION,
+    connectionId,
+    savedQueryId: String(savedQuery.id),
+    semantic: {
+      entityIds: entities.map(item => String(item.id)),
+      relationshipId: String(relationship.id),
+      dimensionIds: dimensions.map(item => String(item.id)),
+      measureId: String(measure.id),
+    },
+    validation: {
+      completedOrderCount,
+      totalRevenue: totalRevenue.toFixed(2),
+    },
+    questions: LOCAL_DEMO_QUESTIONS,
+  };
+}
+
+async function ensureDemoConnection(client, demoPassword) {
+  const connections = await client.listConnections();
+  const existing = Array.isArray(connections)
+    ? connections.find(item => item.name === LOCAL_DEMO_CONNECTION_NAME)
+    : null;
+  if (existing) {
+    if (existing.db_type !== "postgresql") {
+      throw new Error(`The reserved connection name "${LOCAL_DEMO_CONNECTION_NAME}" is already used by a non-PostgreSQL connection.`);
+    }
+    return existing;
+  }
+
+  return client.request("POST", "/api/v1/connections/", {
+    body: {
+      name: LOCAL_DEMO_CONNECTION_NAME,
+      description: `Versioned synthetic retail data for local onboarding (${LOCAL_DEMO_VERSION}).`,
+      db_type: "postgresql",
+      config: {
+        host: "postgres",
+        port: 5432,
+        database_name: LOCAL_DEMO_DATABASE,
+        username: LOCAL_DEMO_USER,
+        password: demoPassword,
+      },
+      auto_pii_detection: false,
+    },
+  });
+}
+
+async function ensureSemanticResource(client, resource, connectionId, name, payload) {
+  const pathName = `/api/v1/semantic/${resource}`;
+  const result = await client.request("GET", pathName, { query: { connection_id: connectionId } });
+  const items = Array.isArray(result?.[resource]) ? result[resource] : [];
+  const existing = items.find(item => item.name === name);
+  if (existing) return existing;
+  return client.request("POST", pathName, {
+    query: { connection_id: connectionId },
+    body: payload,
+  });
+}
+
+async function ensureDemoSavedQuery(client, connectionId) {
+  const result = await client.listSavedQueries();
+  const items = Array.isArray(result?.saved_queries) ? result.saved_queries : [];
+  const existing = items.find(item => item.name === LOCAL_DEMO_SAVED_QUERY_NAME && String(item.connection_id) === connectionId);
+  if (existing) return existing;
+  return client.createSavedQuery({
+    name: LOCAL_DEMO_SAVED_QUERY_NAME,
+    description: "Completed order revenue grouped by month and customer region.",
+    visibility: "org",
+    sql: DEMO_SAVED_QUERY_SQL,
+    connection_id: connectionId,
+  });
+}
+
+function demoSeedSql(password) {
+  const passwordLiteral = `'${password.replaceAll("'", "''")}'`;
+  return `\\set ON_ERROR_STOP on
+DO $role$
+BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = '${LOCAL_DEMO_USER}') THEN
+    CREATE ROLE ${LOCAL_DEMO_USER} LOGIN PASSWORD ${passwordLiteral};
+  ELSE
+    ALTER ROLE ${LOCAL_DEMO_USER} LOGIN PASSWORD ${passwordLiteral};
+  END IF;
+END
+$role$;
+
+SELECT 'CREATE DATABASE ${LOCAL_DEMO_DATABASE} OWNER answerlayer'
+WHERE NOT EXISTS (SELECT 1 FROM pg_database WHERE datname = '${LOCAL_DEMO_DATABASE}')\\gexec
+
+REVOKE ALL ON DATABASE ${LOCAL_DEMO_DATABASE} FROM PUBLIC;
+GRANT CONNECT ON DATABASE ${LOCAL_DEMO_DATABASE} TO ${LOCAL_DEMO_USER};
+
+\\connect ${LOCAL_DEMO_DATABASE}
+
+REVOKE CREATE ON SCHEMA public FROM PUBLIC;
+CREATE SCHEMA IF NOT EXISTS demo AUTHORIZATION answerlayer;
+REVOKE ALL ON SCHEMA demo FROM PUBLIC;
+
+CREATE TABLE IF NOT EXISTS demo.bootstrap_versions (
+  version text PRIMARY KEY,
+  installed_at timestamptz NOT NULL DEFAULT now()
+);
+
+CREATE TABLE IF NOT EXISTS demo.customers (
+  id integer PRIMARY KEY,
+  name text NOT NULL,
+  region text NOT NULL,
+  segment text NOT NULL,
+  signup_date date NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS demo.orders (
+  id integer PRIMARY KEY,
+  customer_id integer NOT NULL REFERENCES demo.customers(id),
+  order_date date NOT NULL,
+  product text NOT NULL,
+  category text NOT NULL,
+  quantity integer NOT NULL CHECK (quantity > 0),
+  unit_price numeric(12, 2) NOT NULL CHECK (unit_price >= 0),
+  status text NOT NULL CHECK (status IN ('completed', 'refunded'))
+);
+
+DO $seed$
+BEGIN
+  IF NOT EXISTS (SELECT 1 FROM demo.bootstrap_versions WHERE version = '${LOCAL_DEMO_VERSION}') THEN
+    DELETE FROM demo.orders;
+    DELETE FROM demo.customers;
+    INSERT INTO demo.customers (id, name, region, segment, signup_date) VALUES
+      (1, 'Maple & Co', 'North', 'SMB', '2025-10-12'),
+      (2, 'Harbour Goods', 'South', 'Mid-market', '2025-11-03'),
+      (3, 'Summit Systems', 'East', 'Enterprise', '2025-11-18'),
+      (4, 'Cedar Studio', 'West', 'SMB', '2025-12-01'),
+      (5, 'Northstar Labs', 'North', 'Enterprise', '2025-12-09'),
+      (6, 'Lakeside Market', 'South', 'SMB', '2025-12-21');
+    INSERT INTO demo.orders (id, customer_id, order_date, product, category, quantity, unit_price, status) VALUES
+      (1, 1, '2026-01-05', 'Analytics seats', 'Subscription', 10, 50.00, 'completed'),
+      (2, 2, '2026-01-08', 'Data connectors', 'Platform', 2, 900.00, 'completed'),
+      (3, 3, '2026-01-12', 'Analytics seats', 'Subscription', 25, 50.00, 'completed'),
+      (4, 4, '2026-01-20', 'Onboarding', 'Services', 1, 750.00, 'completed'),
+      (5, 1, '2026-02-02', 'Analytics seats', 'Subscription', 12, 50.00, 'completed'),
+      (6, 5, '2026-02-10', 'Data connectors', 'Platform', 3, 900.00, 'completed'),
+      (7, 6, '2026-02-14', 'Onboarding', 'Services', 1, 750.00, 'completed'),
+      (8, 3, '2026-02-22', 'Data connectors', 'Platform', 1, 900.00, 'refunded'),
+      (9, 2, '2026-03-03', 'Analytics seats', 'Subscription', 18, 50.00, 'completed'),
+      (10, 4, '2026-03-08', 'Data connectors', 'Platform', 2, 900.00, 'completed'),
+      (11, 5, '2026-03-15', 'Onboarding', 'Services', 1, 750.00, 'completed'),
+      (12, 6, '2026-03-25', 'Analytics seats', 'Subscription', 8, 50.00, 'completed');
+    INSERT INTO demo.bootstrap_versions (version) VALUES ('${LOCAL_DEMO_VERSION}');
+  END IF;
+END
+$seed$;
+
+GRANT USAGE ON SCHEMA demo TO ${LOCAL_DEMO_USER};
+GRANT SELECT ON ALL TABLES IN SCHEMA demo TO ${LOCAL_DEMO_USER};
+ALTER DEFAULT PRIVILEGES IN SCHEMA demo GRANT SELECT ON TABLES TO ${LOCAL_DEMO_USER};
+`;
+}
+
+const DEMO_VALIDATION_SQL = `
+SELECT
+  count(*)::integer AS completed_order_count,
+  round(sum(quantity * unit_price), 2) AS total_revenue
+FROM demo.orders
+WHERE status = 'completed'
+`.trim();
+
+const DEMO_SAVED_QUERY_SQL = `
+SELECT
+  date_trunc('month', o.order_date)::date AS month,
+  c.region,
+  round(sum(o.quantity * o.unit_price), 2) AS revenue
+FROM demo.orders AS o
+JOIN demo.customers AS c ON c.id = o.customer_id
+WHERE o.status = 'completed'
+GROUP BY 1, 2
+ORDER BY 1, 2
+`.trim();
 
 function firstValue(value) {
   return Array.isArray(value) ? value[0] : value;
