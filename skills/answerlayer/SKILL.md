@@ -48,18 +48,36 @@ already available in the Codex skills directory.
    ```
 
    This starts Postgres, runs migrations, waits for readiness, creates the local
-   identity and scoped key, verifies it, and configures the CLI. It captures the
-   one-time key rather than printing it. Use `answerlayer local status` and
+   identity and scoped key, verifies it, and configures the CLI. It also seeds a
+   versioned synthetic retail demo in a separate database, registers a
+   dedicated read-only connection, creates starter semantic resources and a
+   saved query, and verifies a deterministic result. It captures generated
+   credentials rather than printing them. Use `answerlayer local status` and
    `answerlayer local logs` to inspect progress. `local stop` preserves data;
-   `local reset --force` is the explicit destructive reset.
+   `local reset --force` is the explicit destructive reset. Use `--no-demo`
+   only when the user explicitly wants an empty instance.
 
-4. Before connecting real data, require a dedicated database account that is
+4. Inspect the machine-readable demo handoff:
+
+   ```bash
+   answerlayer local demo --json
+   ```
+
+   Report the demo version, connection, verified result, and suggested next
+   action. Do not attempt a natural-language inquiry until a model provider is
+   configured. The demo saved query can be executed without a provider:
+
+   ```bash
+   answerlayer saved-queries execute <saved-query-id> --format table
+   ```
+
+5. Before connecting real data, require a dedicated database account that is
    restricted to approved schemas and `SELECT` only. Show the proposed
    connection host, database, and username, then get confirmation before
    running `connections create` or any query. Put the password only in a local,
    permission-restricted JSON file; never print it or commit it.
 
-5. Start with a small approved schema and read-only inspection. Confirm before
+6. Start with a small approved schema and read-only inspection. Confirm before
    creating connections, generating semantic objects, or executing queries.
 
 This workflow is for Docker Compose development only. Do not run

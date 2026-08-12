@@ -1438,6 +1438,7 @@ function normalizeFlagName(rawName) {
     "--model": "model",
     "--use-semantic-layer": "useSemanticLayer",
     "--no-semantic-layer": "noSemanticLayer",
+    "--no-demo": "noDemo",
     "--options": "options",
     "--status": "status",
     "--summary": "summary",
@@ -1476,7 +1477,7 @@ function normalizeFlagName(rawName) {
 }
 
 function isBooleanFlag(rawName) {
-  return ["--json", "--help", "-h", "--include", "-i", "--raw", "--admin", "--force", "--follow", "--active", "--inactive", "--include-inactive", "--include-semantic-snapshot", "--use-semantic-layer", "--no-semantic-layer"].includes(rawName);
+  return ["--json", "--help", "-h", "--include", "-i", "--raw", "--admin", "--force", "--follow", "--active", "--inactive", "--include-inactive", "--include-semantic-snapshot", "--use-semantic-layer", "--no-semantic-layer", "--no-demo"].includes(rawName);
 }
 
 function setFlag(flags, name, value) {
@@ -1614,7 +1615,9 @@ function helpText() {
 Usage:
   answerlayer skills install [--path <directory>] [--force]
   answerlayer local init [--image <image>] [--port <port>]
-  answerlayer local start|status|logs|stop
+  answerlayer local start [--no-demo]
+  answerlayer local status|logs|stop
+  answerlayer local demo [--json]
   answerlayer local upgrade [--image <image>]
   answerlayer local reset --force
   answerlayer init --api-key <key> [--base-url <url>]

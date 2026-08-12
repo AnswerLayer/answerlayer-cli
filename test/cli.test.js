@@ -172,12 +172,113 @@ test("local start reuses initialized state, starts the image stack, and configur
   assert.equal(fixture.commands.some(([, args]) => args[0] === "pull"), false);
   assert.equal(fixture.commands.some(([, args]) => args.includes("up") && args.includes("--wait")), true);
   assert.equal(fixture.commands.some(([, args]) => args.includes("app.scripts.bootstrap_local")), true);
+  const seedCommand = fixture.commands.find(([, args]) => args.includes("psql"));
+  assert.ok(seedCommand);
+  assert.match(seedCommand[2].input, /CREATE DATABASE answerlayer_demo/);
+  assert.match(seedCommand[2].input, /GRANT SELECT ON ALL TABLES IN SCHEMA demo/);
+  const runtimeEnvironment = fs.readFileSync(path.join(fixture.runtimeDir, "runtime.env"), "utf8");
+  const demoPassword = runtimeEnvironment.match(/ANSWERLAYER_DEMO_PASSWORD=(.+)/)[1];
+  assert.equal(seedCommand[1].join(" ").includes(demoPassword), false);
   assert.deepEqual(JSON.parse(fs.readFileSync(fixture.configPath, "utf8")), {
     baseUrl: "http://127.0.0.1:8000",
     apiKey: "al_local_secret",
   });
   assert.doesNotMatch(fixture.output.text(), /al_local_secret/);
+  assert.doesNotMatch(fixture.output.text(), new RegExp(demoPassword));
+  assert.doesNotMatch(fs.readFileSync(path.join(fixture.runtimeDir, "state.json"), "utf8"), new RegExp(demoPassword));
   assert.match(fixture.output.text(), /Local AnswerLayer is ready/);
+  assert.match(fixture.output.text(), /Demo: ready \(retail-v1\)/);
+  assert.match(fixture.output.text(), /11 completed orders, \$12200\.00 revenue/);
+  assert.match(fixture.output.text(), /saved-queries execute demo-saved-query-id/);
+});
+
+test("local demo bootstrap is API-backed and idempotent", async () => {
+  const fixture = localFixture();
+  await main(["local", "start"], fixture.io);
+  const createCounts = countDemoCreateRequests(fixture.apiRequests);
+
+  fixture.psOutput = JSON.stringify({ Service: "answerlayer", State: "running", Health: "healthy", ExitCode: 0 });
+  fixture.output.clear();
+  await main(["local", "demo", "--json"], fixture.io);
+
+  const result = JSON.parse(fixture.output.text());
+  assert.equal(result.status, "ready");
+  assert.equal(result.version, "retail-v1");
+  assert.equal(result.validation.completedOrderCount, 11);
+  assert.equal(result.validation.totalRevenue, "12200.00");
+  assert.deepEqual(countDemoCreateRequests(fixture.apiRequests), createCounts);
+});
+
+test("local demo JSON stays machine-readable when credentials must be recreated", async () => {
+  const fixture = localFixture();
+  await main(["local", "start"], fixture.io);
+  fs.writeFileSync(fixture.configPath, "{}\n");
+
+  fixture.psOutput = JSON.stringify({ Service: "answerlayer", State: "running", Health: "healthy", ExitCode: 0 });
+  fixture.output.clear();
+  await main(["local", "demo", "--json"], fixture.io);
+
+  const result = JSON.parse(fixture.output.text());
+  assert.equal(result.status, "ready");
+  assert.equal(fixture.commands.filter(([, args]) => args.includes("app.scripts.bootstrap_local")).length, 2);
+});
+
+test("local demo seed failures do not persist a ready demo state", async () => {
+  const fixture = localFixture({ seedError: "permission denied for database answerlayer_demo" });
+
+  await assert.rejects(
+    main(["local", "start"], fixture.io),
+    /permission denied for database answerlayer_demo/,
+  );
+
+  const state = JSON.parse(fs.readFileSync(path.join(fixture.runtimeDir, "state.json"), "utf8"));
+  assert.equal(state.demo, undefined);
+  assert.notEqual(state.lastStatus, "ready");
+});
+
+test("local reinitialization and failed restarts preserve installed demo state", async () => {
+  const fixture = localFixture();
+  await main(["local", "start"], fixture.io);
+  const installed = JSON.parse(fs.readFileSync(path.join(fixture.runtimeDir, "state.json"), "utf8")).demo;
+  fixture.psOutput = JSON.stringify({ Service: "answerlayer", State: "running", Health: "healthy", ExitCode: 0 });
+  fixture.seedError = "temporary demo seed failure";
+
+  await assert.rejects(main(["local", "start"], fixture.io), /temporary demo seed failure/);
+
+  const state = JSON.parse(fs.readFileSync(path.join(fixture.runtimeDir, "state.json"), "utf8"));
+  assert.deepEqual(state.demo, installed);
+});
+
+test("local demo rejects a same-named connection to a different database", async () => {
+  const fixture = localFixture();
+  fixture.demoApi.connections.push({
+    id: "colliding-connection-id",
+    name: "AnswerLayer Demo",
+    db_type: "postgresql",
+    config: {
+      pg_host: "production.example",
+      pg_port: 5432,
+      db_name: "production",
+      pg_username: "production_reader",
+    },
+  });
+
+  await assert.rejects(
+    main(["local", "start"], fixture.io),
+    /already used by a different PostgreSQL database/,
+  );
+  assert.equal(fixture.apiRequests.some(request => request.pathname.startsWith("/api/v1/semantic/")), false);
+});
+
+test("local start can explicitly skip demo installation", async () => {
+  const fixture = localFixture();
+  await main(["local", "start", "--no-demo"], fixture.io);
+
+  assert.equal(fixture.commands.some(([, args]) => args.includes("psql")), false);
+  assert.equal(fixture.apiRequests.some(request => request.pathname === "/api/v1/connections/"), false);
+  assert.match(fixture.output.text(), /Demo: skipped/);
+  const state = JSON.parse(fs.readFileSync(path.join(fixture.runtimeDir, "state.json"), "utf8"));
+  assert.equal(state.demo.status, "skipped");
 });
 
 test("local up is an image-based spelling of local start", async () => {
@@ -199,6 +300,17 @@ test("local status distinguishes migration and exposes the pinned image", async 
   const status = JSON.parse(fixture.output.text());
   assert.equal(status.status, "migrating");
   assert.equal(status.resolvedImage, fixture.resolvedImage);
+});
+
+test("local status shows demo installation state to humans", async () => {
+  const fixture = localFixture();
+  await main(["local", "start"], fixture.io);
+  fixture.psOutput = JSON.stringify({ Service: "answerlayer", State: "running", Health: "healthy", ExitCode: 0 });
+  fixture.output.clear();
+
+  await main(["local", "status"], fixture.io);
+
+  assert.match(fixture.output.text(), /Demo: ready \(retail-v1\)/);
 });
 
 test("local start reports an occupied port before starting containers", async () => {
@@ -1001,7 +1113,21 @@ function localFixture(options = {}) {
   const output = captureStream();
   const commands = [];
   const resolvedImage = "public.ecr.aws/s8d9x7y7/answerlayer@sha256:abc123";
-  const fixture = { tempDir, runtimeDir, configPath, output, commands, resolvedImage, psOutput: "" };
+  const fixture = {
+    tempDir,
+    runtimeDir,
+    configPath,
+    output,
+    commands,
+    resolvedImage,
+    psOutput: "",
+    apiRequests: [],
+    demoApi: {
+      connections: [],
+      savedQueries: [],
+      semantic: Object.fromEntries(["entities", "relationships", "dimensions", "measures"].map(resource => [resource, []])),
+    },
+  };
 
   fixture.io = {
     env: { ANSWERLAYER_LOCAL_DIR: runtimeDir, ANSWERLAYER_CONFIG: configPath },
@@ -1012,12 +1138,64 @@ function localFixture(options = {}) {
     portIsAvailable: () => options.portIsAvailable ?? true,
     sleep: async () => {},
     fetch: async (url, init = {}) => {
-      if (String(url).endsWith("/readyz")) return new Response(JSON.stringify({ status: "ready" }));
-      assert.equal(String(url), "http://127.0.0.1:8000/api/v1/auth/me");
+      const requestUrl = new URL(String(url));
+      if (requestUrl.pathname === "/readyz") return new Response(JSON.stringify({ status: "ready" }));
       assert.equal(init.headers["X-API-Key"], "al_local_secret");
-      return new Response(JSON.stringify({ email: "local@answerlayer.test" }), {
+      const method = init.method || "GET";
+      const body = init.body ? JSON.parse(init.body) : undefined;
+      fixture.apiRequests.push({ method, pathname: requestUrl.pathname, search: requestUrl.search, body });
+      const json = data => new Response(JSON.stringify(data), {
         headers: { "content-type": "application/json" },
       });
+
+      if (requestUrl.pathname === "/api/v1/auth/me") return json({ email: "local@answerlayer.test" });
+      if (requestUrl.pathname === "/api/v1/connections/" && method === "GET") return json(fixture.demoApi.connections);
+      if (requestUrl.pathname === "/api/v1/connections/" && method === "POST") {
+        const connection = {
+          id: "demo-connection-id",
+          name: body.name,
+          db_type: body.db_type,
+          status: "active",
+          config: {
+            pg_host: body.config.host,
+            pg_port: body.config.port,
+            db_name: body.config.database_name,
+            pg_username: body.config.username,
+          },
+        };
+        fixture.demoApi.connections.push(connection);
+        return json(connection);
+      }
+      const semanticMatch = requestUrl.pathname.match(/^\/api\/v1\/semantic\/(entities|relationships|dimensions|measures)$/);
+      if (semanticMatch && method === "GET") {
+        const resource = semanticMatch[1];
+        return json({ [resource]: fixture.demoApi.semantic[resource] });
+      }
+      if (semanticMatch && method === "POST") {
+        const resource = semanticMatch[1];
+        const item = { id: `${resource}-${fixture.demoApi.semantic[resource].length + 1}`, ...body };
+        fixture.demoApi.semantic[resource].push(item);
+        return json(item);
+      }
+      if (requestUrl.pathname === "/api/v1/saved-queries" && method === "GET") {
+        return json({ saved_queries: fixture.demoApi.savedQueries, total: fixture.demoApi.savedQueries.length });
+      }
+      if (requestUrl.pathname === "/api/v1/saved-queries" && method === "POST") {
+        const item = { id: "demo-saved-query-id", ...body };
+        fixture.demoApi.savedQueries.push(item);
+        return json(item);
+      }
+      if (requestUrl.pathname === "/api/v1/query/demo-connection-id" && method === "POST") {
+        assert.match(body.query, /FROM demo\.orders/);
+        return json({
+          columns: ["completed_order_count", "total_revenue"],
+          rows: [[11, "12200.00"]],
+          row_count: 1,
+          total_rows: 1,
+          execution_time_ms: 2,
+        });
+      }
+      throw new Error(`Unexpected local fixture request: ${method} ${requestUrl}`);
     },
     runCommand(command, args, commandOptions) {
       commands.push([command, args, commandOptions]);
@@ -1041,10 +1219,26 @@ function localFixture(options = {}) {
           stderr: "",
         };
       }
+      if (args.includes("psql") && (options.seedError || fixture.seedError)) {
+        return { status: 1, stdout: "", stderr: options.seedError || fixture.seedError };
+      }
       return { status: 0, stdout: "", stderr: "" };
     },
   };
   return fixture;
+}
+
+function countDemoCreateRequests(requests) {
+  return Object.fromEntries(
+    ["connections", "entities", "relationships", "dimensions", "measures", "saved-queries"].map(resource => {
+      const pathName = resource === "connections"
+        ? "/api/v1/connections/"
+        : resource === "saved-queries"
+          ? "/api/v1/saved-queries"
+          : `/api/v1/semantic/${resource}`;
+      return [resource, requests.filter(request => request.method === "POST" && request.pathname === pathName).length];
+    }),
+  );
 }
 
 function captureStream() {

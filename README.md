@@ -115,8 +115,9 @@ to change the local port. The CLI:
 4. Starts Postgres, runs migrations, and waits for AnswerLayer readiness.
 5. Creates a local-only organization and scoped key, verifies the key, and
    saves the CLI configuration without printing the key.
-6. Leaves you ready to connect a dedicated, read-only database user and test a
-   small, approved schema first.
+6. Seeds a versioned synthetic retail demo in a separate Postgres database,
+   registers its dedicated read-only connection, creates starter semantic
+   objects and a saved query, and verifies a deterministic result.
 
 The local stack does not require a hosted AnswerLayer account, a source checkout,
 private registry credentials, or a model-provider key for first boot. Add an
@@ -124,6 +125,28 @@ optional provider key later only when using features that call that provider.
 The skill requires agent confirmation before it starts containers, creates a
 connection, or sends queries to a real database, and it instructs agents not to
 print or persist database passwords.
+
+The demo is installed by default. Use `answerlayer local start --no-demo` to
+skip it, or install/verify it later with:
+
+```bash
+answerlayer local demo
+answerlayer local demo --json
+```
+
+`local demo --json` returns the demo version, connection ID, saved-query ID,
+semantic-resource IDs, the verified result, and suggested natural-language
+questions without returning credentials. The saved query works before a model
+provider is configured:
+
+```bash
+answerlayer saved-queries execute <saved-query-id> --format table
+```
+
+Natural-language inquiry still requires provider configuration. Re-running the
+demo command reuses the same connection and semantic resources rather than
+duplicating them. `local reset --force` explicitly removes both application and
+demo data because they share the selected runtime's isolated Postgres volume.
 
 Inspect and manage the lifecycle with:
 
@@ -160,6 +183,7 @@ answerlayer health
 answerlayer openapi --output openapi.json
 answerlayer local init
 answerlayer local start
+answerlayer local demo --json
 answerlayer local status
 answerlayer local logs
 answerlayer local stop
