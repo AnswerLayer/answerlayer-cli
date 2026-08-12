@@ -236,6 +236,40 @@ test("local demo seed failures do not persist a ready demo state", async () => {
   assert.notEqual(state.lastStatus, "ready");
 });
 
+test("local reinitialization and failed restarts preserve installed demo state", async () => {
+  const fixture = localFixture();
+  await main(["local", "start"], fixture.io);
+  const installed = JSON.parse(fs.readFileSync(path.join(fixture.runtimeDir, "state.json"), "utf8")).demo;
+  fixture.psOutput = JSON.stringify({ Service: "answerlayer", State: "running", Health: "healthy", ExitCode: 0 });
+  fixture.seedError = "temporary demo seed failure";
+
+  await assert.rejects(main(["local", "start"], fixture.io), /temporary demo seed failure/);
+
+  const state = JSON.parse(fs.readFileSync(path.join(fixture.runtimeDir, "state.json"), "utf8"));
+  assert.deepEqual(state.demo, installed);
+});
+
+test("local demo rejects a same-named connection to a different database", async () => {
+  const fixture = localFixture();
+  fixture.demoApi.connections.push({
+    id: "colliding-connection-id",
+    name: "AnswerLayer Demo",
+    db_type: "postgresql",
+    config: {
+      pg_host: "production.example",
+      pg_port: 5432,
+      db_name: "production",
+      pg_username: "production_reader",
+    },
+  });
+
+  await assert.rejects(
+    main(["local", "start"], fixture.io),
+    /already used by a different PostgreSQL database/,
+  );
+  assert.equal(fixture.apiRequests.some(request => request.pathname.startsWith("/api/v1/semantic/")), false);
+});
+
 test("local start can explicitly skip demo installation", async () => {
   const fixture = localFixture();
   await main(["local", "start", "--no-demo"], fixture.io);
@@ -1117,7 +1151,18 @@ function localFixture(options = {}) {
       if (requestUrl.pathname === "/api/v1/auth/me") return json({ email: "local@answerlayer.test" });
       if (requestUrl.pathname === "/api/v1/connections/" && method === "GET") return json(fixture.demoApi.connections);
       if (requestUrl.pathname === "/api/v1/connections/" && method === "POST") {
-        const connection = { id: "demo-connection-id", name: body.name, db_type: body.db_type, status: "active" };
+        const connection = {
+          id: "demo-connection-id",
+          name: body.name,
+          db_type: body.db_type,
+          status: "active",
+          config: {
+            pg_host: body.config.host,
+            pg_port: body.config.port,
+            db_name: body.config.database_name,
+            pg_username: body.config.username,
+          },
+        };
         fixture.demoApi.connections.push(connection);
         return json(connection);
       }
@@ -1174,8 +1219,8 @@ function localFixture(options = {}) {
           stderr: "",
         };
       }
-      if (args.includes("psql") && options.seedError) {
-        return { status: 1, stdout: "", stderr: options.seedError };
+      if (args.includes("psql") && (options.seedError || fixture.seedError)) {
+        return { status: 1, stdout: "", stderr: options.seedError || fixture.seedError };
       }
       return { status: 0, stdout: "", stderr: "" };
     },

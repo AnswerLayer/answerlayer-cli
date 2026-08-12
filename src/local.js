@@ -217,6 +217,7 @@ async function ensureInitialized(parsed, io) {
     requestedImage,
     resolvedImage,
     port,
+    ...(existingState?.demo ? { demo: existingState.demo } : {}),
     ...runtimeResourceNames(runtime.directory),
     createdAt: existingState?.createdAt || new Date().toISOString(),
     updatedAt: new Date().toISOString(),
@@ -651,6 +652,16 @@ async function ensureDemoConnection(client, demoPassword) {
   if (existing) {
     if (existing.db_type !== "postgresql") {
       throw new Error(`The reserved connection name "${LOCAL_DEMO_CONNECTION_NAME}" is already used by a non-PostgreSQL connection.`);
+    }
+    const config = existing.config || {};
+    const ownsDemoDatabase = config.pg_host === "postgres"
+      && Number(config.pg_port) === 5432
+      && config.db_name === LOCAL_DEMO_DATABASE
+      && config.pg_username === LOCAL_DEMO_USER;
+    if (!ownsDemoDatabase) {
+      throw new Error(
+        `The reserved connection name "${LOCAL_DEMO_CONNECTION_NAME}" is already used by a different PostgreSQL database. Rename or remove that connection, then rerun \`answerlayer local demo\`.`,
+      );
     }
     return existing;
   }
