@@ -1439,6 +1439,7 @@ function normalizeFlagName(rawName) {
     "--use-semantic-layer": "useSemanticLayer",
     "--no-semantic-layer": "noSemanticLayer",
     "--no-demo": "noDemo",
+    "--from-file": "fromFile",
     "--options": "options",
     "--status": "status",
     "--summary": "summary",
@@ -1618,6 +1619,9 @@ Usage:
   answerlayer local start [--no-demo]
   answerlayer local status|logs|stop
   answerlayer local demo [--json]
+  answerlayer local provider set|rotate anthropic [--from-file <mode-0600-path>]
+  answerlayer local provider status|verify [anthropic] [--json]
+  answerlayer local provider remove anthropic --force
   answerlayer local upgrade [--image <image>]
   answerlayer local reset --force
   answerlayer init --api-key <key> [--base-url <url>]

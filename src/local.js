@@ -10,6 +10,7 @@ import { defaultConfigPath, readConfig, writeConfig } from "./config.js";
 export const DEFAULT_LOCAL_IMAGE = "public.ecr.aws/s8d9x7y7/answerlayer:1.19.9";
 const DEFAULT_PORT = 8000;
 const MINIMUM_FREE_BYTES = 2 * 1024 * 1024 * 1024;
+const PROVIDER_VALIDATION_TIMEOUT_MS = 15_000;
 const LOCAL_DEMO_VERSION = "retail-v1";
 const LOCAL_DEMO_CONNECTION_NAME = "AnswerLayer Demo";
 const LOCAL_DEMO_SAVED_QUERY_NAME = "Monthly revenue by region";
@@ -20,6 +21,12 @@ const LOCAL_DEMO_QUESTIONS = [
   "Which region generated the most completed revenue?",
   "How did completed revenue change from January to March?",
 ];
+const LOCAL_PROVIDERS = {
+  anthropic: {
+    label: "Anthropic",
+    environmentName: "ANSWERLAYER_ANTHROPIC_API_KEY",
+  },
+};
 
 export async function handleLocal(command, parsed, io) {
   if (command === "init") return localInit(parsed, io);
@@ -28,9 +35,10 @@ export async function handleLocal(command, parsed, io) {
   if (command === "logs") return localLogs(parsed, io);
   if (command === "stop") return localStop(parsed, io);
   if (command === "demo") return localDemo(parsed, io);
+  if (command === "provider") return localProvider(parsed, io);
   if (command === "upgrade") return localUpgrade(parsed, io);
   if (command === "reset") return localReset(parsed, io);
-  throw new Error("Expected `answerlayer local init|start|status|logs|stop|demo|upgrade|reset`");
+  throw new Error("Expected `answerlayer local init|start|status|logs|stop|demo|provider|upgrade|reset`");
 }
 
 export async function localUp(parsed, io) {
@@ -110,6 +118,102 @@ async function localDemo(parsed, io) {
   printDemoSummary(demo, io);
 }
 
+async function localProvider(parsed, io) {
+  const action = parsed.positionals[2];
+  if (!action || !["set", "rotate", "status", "verify", "remove"].includes(action)) {
+    throw new Error("Expected `answerlayer local provider set|rotate|status|verify|remove`");
+  }
+  const provider = resolveLocalProvider(parsed.positionals[3]);
+  if (action === "set" || action === "rotate") return localProviderSet(parsed, io, provider, action);
+  if (action === "status" || action === "verify") return localProviderStatus(parsed, io, provider, action);
+  return localProviderRemove(parsed, io, provider);
+}
+
+async function localProviderSet(parsed, io, provider, action) {
+  if (parsed.flags.apiKey) {
+    throw new Error("Provider secrets are not accepted in command arguments. Use the hidden prompt or --from-file <path>.");
+  }
+  const run = io.runCommand || runCommand;
+  const runtime = requireReadyRuntime(parsed, io, run);
+  const environment = readEnvironment(runtime.envPath);
+  const existingSecret = environment[provider.environmentName] || "";
+  if (action === "rotate" && !existingSecret) {
+    throw new Error(`${provider.label} is not configured. Use \`answerlayer local provider set ${provider.id}\` first.`);
+  }
+  const secret = await readProviderSecret(parsed, io, provider);
+
+  writeEnvironmentValue(runtime.envPath, provider.environmentName, secret);
+  try {
+    restartProviderRuntime(runtime, run);
+  } catch {
+    rollbackProviderCredential(runtime, run, provider, existingSecret, "updating");
+    throw new Error(`Could not restart AnswerLayer with the new ${provider.label} credential. The previous configuration was restored.`);
+  }
+
+  const verification = validateProvider(runtime, run, provider);
+  if (!verification.verified) {
+    rollbackProviderCredential(runtime, run, provider, existingSecret, "verifying");
+    throw new Error(`${provider.label} verification failed (${verification.errorCode}). The previous configuration was restored.`);
+  }
+
+  const result = providerResult(provider, true, "ready", verification);
+  if (parsed.flags.json) {
+    write(io.stdout, `${JSON.stringify(result, null, 2)}\n`);
+    return;
+  }
+  write(io.stdout, `${provider.label} credential ${action === "rotate" || existingSecret ? "rotated" : "configured"} and verified.\n`);
+  write(io.stdout, "The AnswerLayer application was recreated; local database data was preserved.\n");
+}
+
+async function localProviderStatus(parsed, io, provider, action) {
+  const run = io.runCommand || runCommand;
+  const runtime = loadRuntime(parsed, io);
+  requireCommand(run, "docker", ["compose", "version"]);
+  const runtimeStatus = inspectStatus(runtime, run, { tolerateFailure: true }).status;
+  const configured = Boolean(readEnvironment(runtime.envPath)[provider.environmentName]);
+  const verification = configured && runtimeStatus === "ready"
+    ? validateProvider(runtime, run, provider)
+    : { verified: false, errorCode: configured ? "runtime-not-ready" : "not-configured" };
+  const result = providerResult(provider, configured, runtimeStatus, verification);
+
+  if (action === "verify" && result.status !== "verified") {
+    throw new Error(`${provider.label} is ${result.status}. Run \`answerlayer local provider set ${provider.id}\` to configure and verify it.`);
+  }
+  if (parsed.flags.json) {
+    write(io.stdout, `${JSON.stringify(result, null, 2)}\n`);
+    return;
+  }
+  write(io.stdout, `Provider: ${provider.id}\n`);
+  write(io.stdout, `Status: ${result.status}\n`);
+  write(io.stdout, `Runtime: ${runtimeStatus}\n`);
+  if (result.errorCode && result.status === "verification-failed") {
+    write(io.stdout, `Verification error: ${result.errorCode}\n`);
+  }
+}
+
+async function localProviderRemove(parsed, io, provider) {
+  if (!parsed.flags.force) {
+    throw new Error(`Removing ${provider.label} disables model-backed features. Rerun with \`answerlayer local provider remove ${provider.id} --force\` to confirm.`);
+  }
+  const run = io.runCommand || runCommand;
+  const runtime = requireReadyRuntime(parsed, io, run);
+  const existingSecret = readEnvironment(runtime.envPath)[provider.environmentName] || "";
+  writeEnvironmentValue(runtime.envPath, provider.environmentName, "");
+  try {
+    restartProviderRuntime(runtime, run);
+  } catch {
+    rollbackProviderCredential(runtime, run, provider, existingSecret, "removing");
+    throw new Error(`Could not remove ${provider.label}. The previous configuration was restored.`);
+  }
+  const result = providerResult(provider, false, "ready", { verified: false, errorCode: "not-configured" });
+  if (parsed.flags.json) {
+    write(io.stdout, `${JSON.stringify(result, null, 2)}\n`);
+    return;
+  }
+  write(io.stdout, `${provider.label} credential removed. Model-backed features are disabled.\n`);
+  write(io.stdout, "The AnswerLayer application was recreated; local database data was preserved.\n");
+}
+
 async function localUpgrade(parsed, io) {
   const image = firstValue(parsed.flags.image) || io.env.ANSWERLAYER_LOCAL_IMAGE || DEFAULT_LOCAL_IMAGE;
   write(io.stdout, `Upgrading the local runtime to ${image}...\n`);
@@ -128,6 +232,7 @@ async function localStatus(parsed, io) {
     resolvedImage: runtime.state.resolvedImage,
     runtimeDirectory: runtime.directory,
     demo: runtime.state.demo || { status: "not-installed", version: LOCAL_DEMO_VERSION },
+    providers: localProviderConfiguration(runtime),
     services: status.services,
   };
 
@@ -140,6 +245,7 @@ async function localStatus(parsed, io) {
   write(io.stdout, `Image: ${result.resolvedImage}\n`);
   write(io.stdout, `Runtime config: ${result.runtimeDirectory}\n`);
   write(io.stdout, `Demo: ${result.demo.status} (${result.demo.version})\n`);
+  write(io.stdout, `Model provider: ${result.providers.anthropic.configured ? "anthropic (configured)" : "not configured"}\n`);
 }
 
 async function localLogs(parsed, io) {
@@ -423,6 +529,14 @@ function writeEnvironment(envPath, state) {
   fs.chmodSync(envPath, 0o600);
 }
 
+function writeEnvironmentValue(envPath, name, value) {
+  const values = readEnvironment(envPath);
+  values[name] = value;
+  const contents = Object.entries(values).map(([entryName, entryValue]) => `${entryName}=${entryValue}`).join("\n");
+  fs.writeFileSync(envPath, `${contents}\n`, { encoding: "utf8", mode: 0o600 });
+  fs.chmodSync(envPath, 0o600);
+}
+
 function readEnvironment(envPath) {
   if (!fs.existsSync(envPath)) return {};
   return Object.fromEntries(
@@ -431,6 +545,175 @@ function readEnvironment(envPath) {
       return [line.slice(0, separator), line.slice(separator + 1)];
     }),
   );
+}
+
+function localProviderConfiguration(runtime) {
+  const environment = readEnvironment(runtime.envPath);
+  return Object.fromEntries(Object.entries(LOCAL_PROVIDERS).map(([id, provider]) => [
+    id,
+    { configured: Boolean(environment[provider.environmentName]) },
+  ]));
+}
+
+function resolveLocalProvider(value) {
+  const id = String(value || "anthropic").toLowerCase();
+  const provider = LOCAL_PROVIDERS[id];
+  if (!provider) {
+    throw new Error(`Unsupported local model provider ${value}. Supported providers: ${Object.keys(LOCAL_PROVIDERS).join(", ")}`);
+  }
+  return { id, ...provider };
+}
+
+function requireReadyRuntime(parsed, io, run) {
+  const runtime = loadRuntime(parsed, io);
+  requireCommand(run, "docker", ["compose", "version"]);
+  const status = inspectStatus(runtime, run, { tolerateFailure: true });
+  if (status.status !== "ready") {
+    throw new Error("Local AnswerLayer must be ready before changing a model provider. Run `answerlayer local start` first.");
+  }
+  return runtime;
+}
+
+async function readProviderSecret(parsed, io, provider) {
+  const filePath = firstValue(parsed.flags.fromFile) || io.env.ANSWERLAYER_PROVIDER_KEY_FILE;
+  let secret;
+  if (filePath) {
+    const resolvedPath = path.resolve(filePath);
+    let stats;
+    try {
+      stats = fs.statSync(resolvedPath);
+    } catch {
+      throw new Error(`Could not read the provider credential file at ${resolvedPath}`);
+    }
+    if (!stats.isFile()) throw new Error(`Provider credential path is not a file: ${resolvedPath}`);
+    if ((io.platform || process.platform) !== "win32" && (stats.mode & 0o077) !== 0) {
+      throw new Error(`Provider credential file permissions are too broad. Run \`chmod 600 ${resolvedPath}\` and retry.`);
+    }
+    secret = fs.readFileSync(resolvedPath, "utf8").trim();
+  } else if (io.readSecret) {
+    secret = await io.readSecret(`${provider.label} API key: `);
+  } else {
+    secret = await readHiddenInput(io.stdin, io.stderr, `${provider.label} API key: `);
+  }
+
+  if (typeof secret !== "string" || secret.length < 12 || /\s/.test(secret)) {
+    throw new Error(`${provider.label} credential is empty or invalid. Use a single-line API key.`);
+  }
+  return secret;
+}
+
+function readHiddenInput(input, output, prompt) {
+  if (!input?.isTTY || typeof input.setRawMode !== "function") {
+    throw new Error("A terminal is required for hidden credential entry. Run this command in your own terminal or use --from-file <mode-0600-path>.");
+  }
+  write(output, prompt);
+  return new Promise((resolve, reject) => {
+    const wasRaw = Boolean(input.isRaw);
+    const wasPaused = typeof input.isPaused === "function" ? input.isPaused() : false;
+    let secret = "";
+    let settled = false;
+    const cleanup = () => {
+      input.off("data", onData);
+      input.off("end", onEnd);
+      input.off("close", onClose);
+      input.off("error", onError);
+      input.setRawMode(wasRaw);
+      if (wasPaused && typeof input.pause === "function") input.pause();
+      write(output, "\n");
+    };
+    const finish = (error) => {
+      if (settled) return;
+      settled = true;
+      cleanup();
+      if (error) reject(error);
+      else resolve(secret);
+    };
+    const onData = chunk => {
+      for (const character of String(chunk)) {
+        if (character === "\r" || character === "\n") return finish();
+        if (character === "\u0003") return finish(new Error("Provider credential entry cancelled"));
+        if (character === "\u007f" || character === "\b") {
+          secret = secret.slice(0, -1);
+        } else if (character >= " ") {
+          secret += character;
+        }
+      }
+    };
+    const onEnd = () => finish(new Error("Provider credential input ended before submission"));
+    const onClose = () => finish(new Error("Provider credential input closed before submission"));
+    const onError = () => finish(new Error("Provider credential input failed before submission"));
+    input.setRawMode(true);
+    input.on("data", onData);
+    input.once("end", onEnd);
+    input.once("close", onClose);
+    input.once("error", onError);
+    if (typeof input.resume === "function") input.resume();
+  });
+}
+
+function restartProviderRuntime(runtime, run) {
+  const result = run("docker", [
+    ...composeArgs(runtime),
+    "up", "--detach", "--no-deps", "--force-recreate", "--wait", "--wait-timeout", "180", "answerlayer",
+  ], { capture: true });
+  if (result.error || result.status !== 0) {
+    throw new Error("AnswerLayer application restart failed");
+  }
+}
+
+function rollbackProviderCredential(runtime, run, provider, existingSecret, action) {
+  writeEnvironmentValue(runtime.envPath, provider.environmentName, existingSecret);
+  try {
+    restartProviderRuntime(runtime, run);
+  } catch {
+    throw new Error(`Could not restart AnswerLayer while ${action} ${provider.label}. The previous credential remains in runtime.env; run \`answerlayer local start\` to recover.`);
+  }
+}
+
+function validateProvider(runtime, run, provider) {
+  const result = run("docker", [
+    ...composeArgs(runtime),
+    "exec", "-T", "answerlayer", "python", "-c", PROVIDER_VALIDATION_SCRIPT,
+  ], { capture: true, timeout: PROVIDER_VALIDATION_TIMEOUT_MS });
+  if (result.error?.code === "ETIMEDOUT") {
+    return { verified: false, errorCode: `${provider.id}-verification-timeout` };
+  }
+  const payload = parseProviderValidation(result.stdout);
+  if (!result.error && result.status === 0 && payload?.verified === true) {
+    return { verified: true };
+  }
+  return {
+    verified: false,
+    errorCode: /^[A-Za-z][A-Za-z0-9_.-]{0,79}$/.test(payload?.error || "")
+      ? payload.error
+      : `${provider.id}-verification-failed`,
+  };
+}
+
+function parseProviderValidation(stdout) {
+  const line = String(stdout || "").trim().split(/\r?\n/).at(-1);
+  try {
+    return JSON.parse(line);
+  } catch {
+    return null;
+  }
+}
+
+function providerResult(provider, configured, runtimeStatus, verification) {
+  const status = !configured
+    ? "unconfigured"
+    : runtimeStatus !== "ready"
+      ? "configured-runtime-not-ready"
+      : verification.verified
+        ? "verified"
+        : "verification-failed";
+  return {
+    provider: provider.id,
+    configured,
+    status,
+    runtimeStatus,
+    ...(status === "verification-failed" ? { errorCode: verification.errorCode } : {}),
+  };
 }
 
 function readState(statePath) {
@@ -516,6 +799,7 @@ function runCommand(command, args, options = {}) {
   return spawnSync(command, args, {
     encoding: options.capture ? "utf8" : undefined,
     input: options.input,
+    timeout: options.timeout,
     stdio: options.capture
       ? [options.input === undefined ? "ignore" : "pipe", "pipe", "pipe"]
       : "inherit",
@@ -812,6 +1096,25 @@ JOIN demo.customers AS c ON c.id = o.customer_id
 WHERE o.status = 'completed'
 GROUP BY 1, 2
 ORDER BY 1, 2
+`.trim();
+
+const PROVIDER_VALIDATION_SCRIPT = `
+import json
+import os
+
+from anthropic import Anthropic
+
+try:
+    Anthropic(
+        api_key=os.environ["ANTHROPIC_API_KEY"],
+        max_retries=0,
+        timeout=10.0,
+    ).models.list(limit=1)
+except Exception as error:
+    print(json.dumps({"verified": False, "error": type(error).__name__}))
+    raise SystemExit(1)
+
+print(json.dumps({"verified": True}))
 `.trim();
 
 function firstValue(value) {
