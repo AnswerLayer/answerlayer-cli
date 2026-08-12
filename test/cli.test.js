@@ -345,6 +345,34 @@ test("local provider set hides interactive input and verifies inside the runtime
   assert.equal(providerCommands.some(([, args]) => args.some(value => String(value).includes(secret))), false);
 });
 
+test("local provider hidden input restores terminal mode when the stream terminates", async () => {
+  for (const event of ["end", "close", "error"]) {
+    const fixture = localFixture();
+    await main(["local", "start"], fixture.io);
+    fixture.psOutput = JSON.stringify({ Service: "answerlayer", State: "running", Health: "healthy", ExitCode: 0 });
+    const input = new PassThrough();
+    const rawModes = [];
+    input.isTTY = true;
+    input.isRaw = false;
+    input.setRawMode = value => {
+      rawModes.push(value);
+      input.isRaw = value;
+      return input;
+    };
+    fixture.io.stdin = input;
+
+    const setting = main(["local", "provider", "set", "anthropic"], fixture.io);
+    setImmediate(() => {
+      if (event === "end") input.end();
+      else if (event === "close") input.emit("close");
+      else input.emit("error", new Error("terminal disconnected"));
+    });
+
+    await assert.rejects(setting, /before submission/);
+    assert.deepEqual(rawModes, [true, false], `terminal mode should be restored after ${event}`);
+  }
+});
+
 test("local provider set supports a permission-restricted credential file", async () => {
   const fixture = localFixture();
   await main(["local", "start"], fixture.io);
@@ -418,6 +446,25 @@ test("local provider status reports verification failure without secret material
   const localStatus = JSON.parse(fixture.output.text());
   assert.deepEqual(localStatus.providers, { anthropic: { configured: true } });
   assert.doesNotMatch(fixture.output.text(), new RegExp(secret));
+});
+
+test("local provider verification has a bounded timeout", async () => {
+  const fixture = localFixture();
+  await main(["local", "start"], fixture.io);
+  fixture.psOutput = JSON.stringify({ Service: "answerlayer", State: "running", Health: "healthy", ExitCode: 0 });
+  const secretPath = path.join(fixture.tempDir, "anthropic.key");
+  fs.writeFileSync(secretPath, "sk-ant-test-timeout-secret\n", { mode: 0o600 });
+  await main(["local", "provider", "set", "anthropic", "--from-file", secretPath], fixture.io);
+  fixture.providerTimeout = true;
+  fixture.output.clear();
+
+  await main(["local", "provider", "status", "anthropic", "--json"], fixture.io);
+
+  const result = JSON.parse(fixture.output.text());
+  assert.equal(result.status, "verification-failed");
+  assert.equal(result.errorCode, "anthropic-verification-timeout");
+  const validation = fixture.commands.at(-1);
+  assert.equal(validation[2].timeout, 15_000);
 });
 
 test("local provider rotation restores the previous credential when verification fails", async () => {
@@ -1377,7 +1424,10 @@ function localFixture(options = {}) {
       if (args.includes("psql") && (options.seedError || fixture.seedError)) {
         return { status: 1, stdout: "", stderr: options.seedError || fixture.seedError };
       }
-      if (args.includes("-c") && args.some(value => String(value).includes("Anthropic(api_key"))) {
+      if (args.includes("-c") && args.some(value => String(value).includes("models.list(limit=1)"))) {
+        if (fixture.providerTimeout) {
+          return { status: null, stdout: "", stderr: "", error: { code: "ETIMEDOUT" } };
+        }
         return {
           status: fixture.providerValidation.verified ? 0 : 1,
           stdout: `${JSON.stringify(fixture.providerValidation)}\n`,

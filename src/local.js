@@ -10,6 +10,7 @@ import { defaultConfigPath, readConfig, writeConfig } from "./config.js";
 export const DEFAULT_LOCAL_IMAGE = "public.ecr.aws/s8d9x7y7/answerlayer:1.19.9";
 const DEFAULT_PORT = 8000;
 const MINIMUM_FREE_BYTES = 2 * 1024 * 1024 * 1024;
+const PROVIDER_VALIDATION_TIMEOUT_MS = 15_000;
 const LOCAL_DEMO_VERSION = "retail-v1";
 const LOCAL_DEMO_CONNECTION_NAME = "AnswerLayer Demo";
 const LOCAL_DEMO_SAVED_QUERY_NAME = "Monthly revenue by region";
@@ -610,13 +611,19 @@ function readHiddenInput(input, output, prompt) {
     const wasRaw = Boolean(input.isRaw);
     const wasPaused = typeof input.isPaused === "function" ? input.isPaused() : false;
     let secret = "";
+    let settled = false;
     const cleanup = () => {
       input.off("data", onData);
+      input.off("end", onEnd);
+      input.off("close", onClose);
+      input.off("error", onError);
       input.setRawMode(wasRaw);
       if (wasPaused && typeof input.pause === "function") input.pause();
       write(output, "\n");
     };
     const finish = (error) => {
+      if (settled) return;
+      settled = true;
       cleanup();
       if (error) reject(error);
       else resolve(secret);
@@ -632,8 +639,14 @@ function readHiddenInput(input, output, prompt) {
         }
       }
     };
+    const onEnd = () => finish(new Error("Provider credential input ended before submission"));
+    const onClose = () => finish(new Error("Provider credential input closed before submission"));
+    const onError = () => finish(new Error("Provider credential input failed before submission"));
     input.setRawMode(true);
     input.on("data", onData);
+    input.once("end", onEnd);
+    input.once("close", onClose);
+    input.once("error", onError);
     if (typeof input.resume === "function") input.resume();
   });
 }
@@ -661,7 +674,10 @@ function validateProvider(runtime, run, provider) {
   const result = run("docker", [
     ...composeArgs(runtime),
     "exec", "-T", "answerlayer", "python", "-c", PROVIDER_VALIDATION_SCRIPT,
-  ], { capture: true });
+  ], { capture: true, timeout: PROVIDER_VALIDATION_TIMEOUT_MS });
+  if (result.error?.code === "ETIMEDOUT") {
+    return { verified: false, errorCode: `${provider.id}-verification-timeout` };
+  }
   const payload = parseProviderValidation(result.stdout);
   if (!result.error && result.status === 0 && payload?.verified === true) {
     return { verified: true };
@@ -783,6 +799,7 @@ function runCommand(command, args, options = {}) {
   return spawnSync(command, args, {
     encoding: options.capture ? "utf8" : undefined,
     input: options.input,
+    timeout: options.timeout,
     stdio: options.capture
       ? [options.input === undefined ? "ignore" : "pipe", "pipe", "pipe"]
       : "inherit",
@@ -1088,7 +1105,11 @@ import os
 from anthropic import Anthropic
 
 try:
-    Anthropic(api_key=os.environ["ANTHROPIC_API_KEY"]).models.list(limit=1)
+    Anthropic(
+        api_key=os.environ["ANTHROPIC_API_KEY"],
+        max_retries=0,
+        timeout=10.0,
+    ).models.list(limit=1)
 except Exception as error:
     print(json.dumps({"verified": False, "error": type(error).__name__}))
     raise SystemExit(1)
