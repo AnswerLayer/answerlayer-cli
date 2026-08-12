@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { Readable, Writable } from "node:stream";
+import { PassThrough, Readable, Writable } from "node:stream";
 import test from "node:test";
 import { main } from "../src/cli.js";
 
@@ -311,6 +311,158 @@ test("local status shows demo installation state to humans", async () => {
   await main(["local", "status"], fixture.io);
 
   assert.match(fixture.output.text(), /Demo: ready \(retail-v1\)/);
+});
+
+test("local provider set hides interactive input and verifies inside the runtime", async () => {
+  const fixture = localFixture();
+  await main(["local", "start"], fixture.io);
+  fixture.psOutput = JSON.stringify({ Service: "answerlayer", State: "running", Health: "healthy", ExitCode: 0 });
+  fixture.output.clear();
+
+  const input = new PassThrough();
+  const rawModes = [];
+  input.isTTY = true;
+  input.isRaw = false;
+  input.setRawMode = value => {
+    rawModes.push(value);
+    input.isRaw = value;
+    return input;
+  };
+  fixture.io.stdin = input;
+  const secret = "sk-ant-test-interactive-secret";
+  const setting = main(["local", "provider", "set", "anthropic"], fixture.io);
+  setImmediate(() => input.write(`${secret}\n`));
+  await setting;
+
+  assert.deepEqual(rawModes, [true, false]);
+  assert.doesNotMatch(fixture.output.text(), new RegExp(secret));
+  assert.doesNotMatch(fixture.errorOutput.text(), new RegExp(secret));
+  assert.match(fixture.output.text(), /configured and verified/);
+  assert.match(fs.readFileSync(path.join(fixture.runtimeDir, "runtime.env"), "utf8"), new RegExp(secret));
+  assert.doesNotMatch(fs.readFileSync(path.join(fixture.runtimeDir, "state.json"), "utf8"), new RegExp(secret));
+  const providerCommands = fixture.commands.filter(([, args]) => args.includes("answerlayer"));
+  assert.equal(providerCommands.some(([, args]) => args.includes("--force-recreate")), true);
+  assert.equal(providerCommands.some(([, args]) => args.some(value => String(value).includes(secret))), false);
+});
+
+test("local provider set supports a permission-restricted credential file", async () => {
+  const fixture = localFixture();
+  await main(["local", "start"], fixture.io);
+  fixture.psOutput = JSON.stringify({ Service: "answerlayer", State: "running", Health: "healthy", ExitCode: 0 });
+  const secretPath = path.join(fixture.tempDir, "anthropic.key");
+  const secret = "sk-ant-test-file-secret";
+  fs.writeFileSync(secretPath, `${secret}\n`, { mode: 0o600 });
+  fixture.output.clear();
+
+  fixture.io.env.ANSWERLAYER_PROVIDER_KEY_FILE = secretPath;
+  await main(["local", "provider", "set", "anthropic", "--json"], fixture.io);
+
+  const result = JSON.parse(fixture.output.text());
+  assert.deepEqual(result, {
+    provider: "anthropic",
+    configured: true,
+    status: "verified",
+    runtimeStatus: "ready",
+  });
+  assert.doesNotMatch(fixture.output.text(), new RegExp(secret));
+});
+
+test("local provider set rejects broadly readable credential files", async () => {
+  const fixture = localFixture();
+  await main(["local", "start"], fixture.io);
+  fixture.psOutput = JSON.stringify({ Service: "answerlayer", State: "running", Health: "healthy", ExitCode: 0 });
+  const secretPath = path.join(fixture.tempDir, "anthropic.key");
+  fs.writeFileSync(secretPath, "sk-ant-test-public-secret\n", { mode: 0o644 });
+
+  await assert.rejects(
+    main(["local", "provider", "set", "anthropic", "--from-file", secretPath], fixture.io),
+    /permissions are too broad/,
+  );
+  assert.doesNotMatch(fs.readFileSync(path.join(fixture.runtimeDir, "runtime.env"), "utf8"), /sk-ant-test-public-secret/);
+});
+
+test("local provider set rejects secrets in command arguments", async () => {
+  const fixture = localFixture();
+  await main(["local", "start"], fixture.io);
+  fixture.psOutput = JSON.stringify({ Service: "answerlayer", State: "running", Health: "healthy", ExitCode: 0 });
+
+  await assert.rejects(
+    main(["local", "provider", "set", "anthropic", "--api-key", "sk-ant-test-argument-secret"], fixture.io),
+    /not accepted in command arguments/,
+  );
+  assert.doesNotMatch(fs.readFileSync(path.join(fixture.runtimeDir, "runtime.env"), "utf8"), /sk-ant-test-argument-secret/);
+});
+
+test("local provider status reports verification failure without secret material", async () => {
+  const fixture = localFixture();
+  await main(["local", "start"], fixture.io);
+  fixture.psOutput = JSON.stringify({ Service: "answerlayer", State: "running", Health: "healthy", ExitCode: 0 });
+  const secretPath = path.join(fixture.tempDir, "anthropic.key");
+  const secret = "sk-ant-test-status-secret";
+  fs.writeFileSync(secretPath, `${secret}\n`, { mode: 0o600 });
+  await main(["local", "provider", "set", "anthropic", "--from-file", secretPath], fixture.io);
+  fixture.providerValidation = { verified: false, error: "AuthenticationError" };
+  fixture.output.clear();
+
+  await main(["local", "provider", "status", "anthropic", "--json"], fixture.io);
+
+  const result = JSON.parse(fixture.output.text());
+  assert.equal(result.configured, true);
+  assert.equal(result.status, "verification-failed");
+  assert.equal(result.errorCode, "AuthenticationError");
+  assert.doesNotMatch(fixture.output.text(), new RegExp(secret));
+
+  fixture.providerValidation = { verified: true };
+  fixture.output.clear();
+  await main(["local", "status", "--json"], fixture.io);
+  const localStatus = JSON.parse(fixture.output.text());
+  assert.deepEqual(localStatus.providers, { anthropic: { configured: true } });
+  assert.doesNotMatch(fixture.output.text(), new RegExp(secret));
+});
+
+test("local provider rotation restores the previous credential when verification fails", async () => {
+  const fixture = localFixture();
+  await main(["local", "start"], fixture.io);
+  fixture.psOutput = JSON.stringify({ Service: "answerlayer", State: "running", Health: "healthy", ExitCode: 0 });
+  const firstPath = path.join(fixture.tempDir, "anthropic-first.key");
+  const nextPath = path.join(fixture.tempDir, "anthropic-next.key");
+  const firstSecret = "sk-ant-test-working-secret";
+  const nextSecret = "sk-ant-test-invalid-secret";
+  fs.writeFileSync(firstPath, `${firstSecret}\n`, { mode: 0o600 });
+  fs.writeFileSync(nextPath, `${nextSecret}\n`, { mode: 0o600 });
+  await main(["local", "provider", "set", "anthropic", "--from-file", firstPath], fixture.io);
+  fixture.providerValidation = { verified: false, error: "AuthenticationError" };
+  fixture.output.clear();
+
+  await assert.rejects(
+    main(["local", "provider", "rotate", "anthropic", "--from-file", nextPath], fixture.io),
+    /previous configuration was restored/,
+  );
+
+  const environment = fs.readFileSync(path.join(fixture.runtimeDir, "runtime.env"), "utf8");
+  assert.match(environment, new RegExp(firstSecret));
+  assert.doesNotMatch(environment, new RegExp(nextSecret));
+  assert.doesNotMatch(fixture.output.text(), new RegExp(nextSecret));
+});
+
+test("local provider removal is explicit and preserves the database volume", async () => {
+  const fixture = localFixture();
+  await main(["local", "start"], fixture.io);
+  fixture.psOutput = JSON.stringify({ Service: "answerlayer", State: "running", Health: "healthy", ExitCode: 0 });
+  const secretPath = path.join(fixture.tempDir, "anthropic.key");
+  fs.writeFileSync(secretPath, "sk-ant-test-removal-secret\n", { mode: 0o600 });
+  await main(["local", "provider", "set", "anthropic", "--from-file", secretPath], fixture.io);
+  fixture.commands.length = 0;
+
+  await assert.rejects(
+    main(["local", "provider", "remove", "anthropic"], fixture.io),
+    /--force/,
+  );
+  await main(["local", "provider", "remove", "anthropic", "--force"], fixture.io);
+
+  assert.match(fs.readFileSync(path.join(fixture.runtimeDir, "runtime.env"), "utf8"), /ANSWERLAYER_ANTHROPIC_API_KEY=\n/);
+  assert.equal(fixture.commands.some(([, args]) => args.includes("--force-recreate")), true);
+  assert.equal(fixture.commands.some(([, args]) => args.includes("--volumes")), false);
 });
 
 test("local start reports an occupied port before starting containers", async () => {
@@ -1111,6 +1263,7 @@ function localFixture(options = {}) {
   const runtimeDir = path.join(tempDir, "runtime");
   const configPath = path.join(tempDir, "config.json");
   const output = captureStream();
+  const errorOutput = captureStream();
   const commands = [];
   const resolvedImage = "public.ecr.aws/s8d9x7y7/answerlayer@sha256:abc123";
   const fixture = {
@@ -1118,9 +1271,11 @@ function localFixture(options = {}) {
     runtimeDir,
     configPath,
     output,
+    errorOutput,
     commands,
     resolvedImage,
     psOutput: "",
+    providerValidation: { verified: true },
     apiRequests: [],
     demoApi: {
       connections: [],
@@ -1133,7 +1288,7 @@ function localFixture(options = {}) {
     env: { ANSWERLAYER_LOCAL_DIR: runtimeDir, ANSWERLAYER_CONFIG: configPath },
     stdin: readableStdin(),
     stdout: output,
-    stderr: captureStream(),
+    stderr: errorOutput,
     availableBytes: options.availableBytes ?? 10 * 1024 * 1024 * 1024,
     portIsAvailable: () => options.portIsAvailable ?? true,
     sleep: async () => {},
@@ -1221,6 +1376,13 @@ function localFixture(options = {}) {
       }
       if (args.includes("psql") && (options.seedError || fixture.seedError)) {
         return { status: 1, stdout: "", stderr: options.seedError || fixture.seedError };
+      }
+      if (args.includes("-c") && args.some(value => String(value).includes("Anthropic(api_key"))) {
+        return {
+          status: fixture.providerValidation.verified ? 0 : 1,
+          stdout: `${JSON.stringify(fixture.providerValidation)}\n`,
+          stderr: "",
+        };
       }
       return { status: 0, stdout: "", stderr: "" };
     },

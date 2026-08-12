@@ -71,13 +71,32 @@ already available in the Codex skills directory.
    answerlayer saved-queries execute <saved-query-id> --format table
    ```
 
-5. Before connecting real data, require a dedicated database account that is
+5. When the user wants natural-language inquiry, hand provider setup back to
+   them. Ask them to run this command privately in their own terminal:
+
+   ```bash
+   answerlayer local provider set anthropic
+   ```
+
+   Do not ask the user to paste a provider key into chat and do not pass a key
+   in command arguments. The CLI disables terminal echo, stores the credential
+   in the selected runtime's permission-restricted environment, recreates only
+   the application container, and verifies the provider. For automation, the
+   user may place the key in a mode-0600 file and pass its path with
+   `--from-file`; do not read or print that file. After the user confirms the
+   command completed, inspect only secret-free status:
+
+   ```bash
+   answerlayer local provider status --json
+   ```
+
+6. Before connecting real data, require a dedicated database account that is
    restricted to approved schemas and `SELECT` only. Show the proposed
    connection host, database, and username, then get confirmation before
    running `connections create` or any query. Put the password only in a local,
    permission-restricted JSON file; never print it or commit it.
 
-6. Start with a small approved schema and read-only inspection. Confirm before
+7. Start with a small approved schema and read-only inspection. Confirm before
    creating connections, generating semantic objects, or executing queries.
 
 This workflow is for Docker Compose development only. Do not run

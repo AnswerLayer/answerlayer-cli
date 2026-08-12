@@ -148,6 +148,33 @@ demo command reuses the same connection and semantic resources rather than
 duplicating them. `local reset --force` explicitly removes both application and
 demo data because they share the selected runtime's isolated Postgres volume.
 
+Configure Anthropic privately from your own terminal when you are ready to use
+model-backed features:
+
+```bash
+answerlayer local provider set anthropic
+answerlayer local provider status --json
+```
+
+The interactive command disables terminal echo while you enter the key. It
+stores the credential only in the selected runtime's mode-0600 environment,
+recreates the application container without touching Postgres, and verifies the
+key with Anthropic's model-list API from inside that container. The key is never
+accepted as a command argument or returned by status output.
+
+For non-interactive automation, place the key in a mode-0600 file and pass only
+its path:
+
+```bash
+answerlayer local provider set anthropic --from-file /secure/path/anthropic.key
+# Or set ANSWERLAYER_PROVIDER_KEY_FILE to that path.
+```
+
+Use `local provider rotate anthropic` to replace a working key. If validation
+fails, the previous credential is restored. Use
+`local provider remove anthropic --force` to disable model-backed features while
+preserving all application and demo data.
+
 Inspect and manage the lifecycle with:
 
 ```bash
@@ -184,6 +211,7 @@ answerlayer openapi --output openapi.json
 answerlayer local init
 answerlayer local start
 answerlayer local demo --json
+answerlayer local provider status --json
 answerlayer local status
 answerlayer local logs
 answerlayer local stop
