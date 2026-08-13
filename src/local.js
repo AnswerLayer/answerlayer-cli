@@ -8,7 +8,7 @@ import { createInterface } from "node:readline/promises";
 import { AnswerLayerClient } from "./client.js";
 import { defaultConfigPath, readConfig, writeConfig } from "./config.js";
 
-export const DEFAULT_LOCAL_IMAGE = "public.ecr.aws/s8d9x7y7/answerlayer:1.19.9";
+export const DEFAULT_LOCAL_IMAGE = "public.ecr.aws/s8d9x7y7/answerlayer:1.20.3";
 const DEFAULT_PORT = 8000;
 const MINIMUM_FREE_BYTES = 2 * 1024 * 1024 * 1024;
 const PROVIDER_VALIDATION_TIMEOUT_MS = 15_000;

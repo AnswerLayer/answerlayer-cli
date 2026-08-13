@@ -153,7 +153,7 @@ test("local init pulls the public image and pins its digest without Git or provi
   await main(["local", "init"], fixture.io);
 
   const state = JSON.parse(fs.readFileSync(path.join(fixture.runtimeDir, "state.json"), "utf8"));
-  assert.equal(state.requestedImage, "public.ecr.aws/s8d9x7y7/answerlayer:1.19.9");
+  assert.equal(state.requestedImage, "public.ecr.aws/s8d9x7y7/answerlayer:1.20.3");
   assert.equal(state.resolvedImage, fixture.resolvedImage);
   assert.equal(fs.statSync(path.join(fixture.runtimeDir, "runtime.env")).mode & 0o777, 0o600);
   assert.match(fs.readFileSync(path.join(fixture.runtimeDir, "runtime.env"), "utf8"), new RegExp(`ANSWERLAYER_IMAGE=${fixture.resolvedImage}`));
