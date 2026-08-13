@@ -9,7 +9,7 @@ import { AnswerLayerClient } from "./client.js";
 import { defaultConfigPath, readConfig, writeConfig } from "./config.js";
 
 export const DEFAULT_LOCAL_IMAGE = "public.ecr.aws/s8d9x7y7/answerlayer:1.20.3";
-const DEFAULT_PORT = 8000;
+const DEFAULT_PORT = 8172;
 const MINIMUM_FREE_BYTES = 2 * 1024 * 1024 * 1024;
 const PROVIDER_VALIDATION_TIMEOUT_MS = 15_000;
 const LOCAL_DEMO_VERSION = "retail-v1";
@@ -1375,10 +1375,10 @@ const COMPOSE_FILE = [
   "      RESULT_GC_INTERVAL_SECONDS: \"0\"",
   "      TELEMETRY_PUSH_INTERVAL_SECONDS: \"0\"",
   "      METER_SYNC_INTERVAL_SECONDS: \"0\"",
-  "      FRONTEND_BASE_URL: http://127.0.0.1:${ANSWERLAYER_PORT:-8000}",
-  "      CORS_ORIGINS: http://127.0.0.1:${ANSWERLAYER_PORT:-8000},http://localhost:${ANSWERLAYER_PORT:-8000}",
+  "      FRONTEND_BASE_URL: http://127.0.0.1:${ANSWERLAYER_PORT:-8172}",
+  "      CORS_ORIGINS: http://127.0.0.1:${ANSWERLAYER_PORT:-8172},http://localhost:${ANSWERLAYER_PORT:-8172}",
   "    ports:",
-  "      - \"127.0.0.1:${ANSWERLAYER_PORT:-8000}:8000\"",
+  "      - \"127.0.0.1:${ANSWERLAYER_PORT:-8172}:8000\"",
   "    depends_on:",
   "      postgres:",
   "        condition: service_healthy",
