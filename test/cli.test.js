@@ -512,6 +512,117 @@ test("local provider removal is explicit and preserves the database volume", asy
   assert.equal(fixture.commands.some(([, args]) => args.includes("--volumes")), false);
 });
 
+test("local quickstart confirms changes and returns an actionable provider handoff", async () => {
+  const fixture = localFixture();
+  fixture.io.confirm = async prompt => {
+    assert.match(prompt, /start local containers/);
+    return true;
+  };
+
+  await main(["local", "quickstart", "--json"], fixture.io);
+
+  const result = JSON.parse(fixture.output.text());
+  assert.equal(result.status, "provider-required");
+  assert.equal(result.cliVersion, "0.1.0");
+  assert.equal(result.runtime.status, "ready");
+  assert.equal(result.runtime.resolvedImage, fixture.resolvedImage);
+  assert.equal(result.demo.status, "ready");
+  assert.equal(result.demo.connectionId, "demo-connection-id");
+  assert.equal(result.provider.configured, false);
+  assert.equal(result.inquiry.status, "not-run");
+  assert.deepEqual(result.nextActions.slice(0, 2), [
+    "answerlayer local provider set anthropic",
+    "answerlayer local quickstart",
+  ]);
+  assert.doesNotMatch(fixture.output.text(), /al_local_secret/);
+  const state = JSON.parse(fs.readFileSync(path.join(fixture.runtimeDir, "state.json"), "utf8"));
+  assert.equal(state.quickstart.status, "provider-required");
+});
+
+test("local quickstart resumes after provider setup and runs one real inquiry", async () => {
+  const fixture = localFixture();
+  fixture.io.confirm = async () => true;
+  await main(["local", "quickstart", "--json"], fixture.io);
+  fixture.psOutput = JSON.stringify({ Service: "answerlayer", State: "running", Health: "healthy", ExitCode: 0 });
+  const secretPath = path.join(fixture.tempDir, "anthropic.key");
+  const secret = "sk-ant-test-quickstart-secret";
+  fs.writeFileSync(secretPath, `${secret}\n`, { mode: 0o600 });
+  await main(["local", "provider", "set", "anthropic", "--from-file", secretPath], fixture.io);
+  fixture.output.clear();
+  await main(["local", "status", "--json"], fixture.io);
+  const status = JSON.parse(fixture.output.text());
+  assert.equal(status.quickstart.status, "provider-required");
+  fixture.output.clear();
+
+  await main(["local", "quickstart", "--yes", "--json"], fixture.io);
+
+  const result = JSON.parse(fixture.output.text());
+  assert.equal(result.status, "complete");
+  assert.equal(result.provider.status, "verified");
+  assert.equal(result.inquiry.status, "verified");
+  assert.equal(result.inquiry.sessionId, "quickstart-session-id");
+  assert.equal(result.inquiry.model, "claude-sonnet-4-6");
+  assert.match(result.inquiry.answer, /January through March/);
+  assert.deepEqual(result.inquiry.sqlQueries, ["SELECT month, revenue FROM demo_monthly_revenue"]);
+  assert.doesNotMatch(fixture.output.text(), new RegExp(secret));
+  assert.equal(fixture.apiRequests.filter(request => request.pathname === "/api/v1/inquiry/sessions").length, 1);
+  assert.equal(fixture.apiRequests.filter(request => request.pathname.endsWith("/sync")).length, 1);
+  fixture.output.clear();
+  await main(["local", "status", "--json"], fixture.io);
+  assert.equal(JSON.parse(fixture.output.text()).quickstart.status, "complete");
+});
+
+test("local quickstart reuses a completed inquiry on repeat runs", async () => {
+  const fixture = localFixture();
+  fixture.io.confirm = async () => true;
+  await main(["local", "quickstart", "--json"], fixture.io);
+  fixture.psOutput = JSON.stringify({ Service: "answerlayer", State: "running", Health: "healthy", ExitCode: 0 });
+  const secretPath = path.join(fixture.tempDir, "anthropic.key");
+  fs.writeFileSync(secretPath, "sk-ant-test-repeat-secret\n", { mode: 0o600 });
+  await main(["local", "provider", "set", "anthropic", "--from-file", secretPath], fixture.io);
+  fixture.output.clear();
+  await main(["local", "quickstart", "--yes", "--json"], fixture.io);
+  const inquiryRequestCount = fixture.apiRequests.filter(request => request.pathname.startsWith("/api/v1/inquiry/sessions")).length;
+  const first = JSON.parse(fixture.output.text());
+  fixture.output.clear();
+
+  await main(["local", "quickstart", "--yes", "--json"], fixture.io);
+
+  const repeated = JSON.parse(fixture.output.text());
+  assert.equal(repeated.inquiry.sessionId, first.inquiry.sessionId);
+  assert.equal(
+    fixture.apiRequests.filter(request => request.pathname.startsWith("/api/v1/inquiry/sessions")).length,
+    inquiryRequestCount,
+  );
+  assert.equal(fixture.demoApi.connections.length, 1);
+});
+
+test("local quickstart makes no changes when confirmation is declined", async () => {
+  const fixture = localFixture();
+  fixture.io.confirm = async () => false;
+
+  await assert.rejects(main(["local", "quickstart"], fixture.io), /cancelled before making local runtime changes/);
+
+  assert.equal(fixture.commands.length, 0);
+  assert.equal(fs.existsSync(fixture.runtimeDir), false);
+});
+
+test("local quickstart does not record completion when inquiry fails", async () => {
+  const fixture = localFixture();
+  fixture.io.confirm = async () => true;
+  await main(["local", "quickstart", "--json"], fixture.io);
+  fixture.psOutput = JSON.stringify({ Service: "answerlayer", State: "running", Health: "healthy", ExitCode: 0 });
+  const secretPath = path.join(fixture.tempDir, "anthropic.key");
+  fs.writeFileSync(secretPath, "sk-ant-test-inquiry-failure\n", { mode: 0o600 });
+  await main(["local", "provider", "set", "anthropic", "--from-file", secretPath], fixture.io);
+  fixture.inquiryError = true;
+
+  await assert.rejects(main(["local", "quickstart", "--yes", "--json"], fixture.io), /model unavailable/);
+
+  const state = JSON.parse(fs.readFileSync(path.join(fixture.runtimeDir, "state.json"), "utf8"));
+  assert.notEqual(state.quickstart.status, "complete");
+});
+
 test("local start reports an occupied port before starting containers", async () => {
   const fixture = localFixture({ portIsAvailable: false });
   await main(["local", "init"], fixture.io);
@@ -529,6 +640,8 @@ test("local reset requires explicit confirmation and deletes only after --force"
 
   assert.equal(fixture.commands.some(([, args]) => args.includes("down") && args.includes("--volumes")), true);
   assert.match(fixture.output.text(), /Deleted the local AnswerLayer database volume/);
+  const state = JSON.parse(fs.readFileSync(path.join(fixture.runtimeDir, "state.json"), "utf8"));
+  assert.equal(state.quickstart.status, "not-started");
 });
 
 test("separate runtime directories use isolated Compose and persistent resource names", async () => {
@@ -1395,6 +1508,32 @@ function localFixture(options = {}) {
           row_count: 1,
           total_rows: 1,
           execution_time_ms: 2,
+        });
+      }
+      if (requestUrl.pathname === "/api/v1/inquiry/models" && method === "GET") {
+        return json({
+          default_model: "claude-sonnet-4-6",
+          models: [{ id: "claude-sonnet-4-6", label: "Claude Sonnet 4.6" }],
+        });
+      }
+      if (requestUrl.pathname === "/api/v1/inquiry/sessions" && method === "POST") {
+        assert.equal(body.connection_id, "demo-connection-id");
+        assert.equal(body.model, "claude-sonnet-4-6");
+        assert.equal(body.use_semantic_layer, true);
+        return json({ session_id: "quickstart-session-id" });
+      }
+      if (requestUrl.pathname === "/api/v1/inquiry/sessions/quickstart-session-id/sync" && method === "POST") {
+        assert.equal(body.user_input, "How much completed revenue did we generate each month?");
+        if (fixture.inquiryError) {
+          return new Response(JSON.stringify({ detail: "model unavailable" }), {
+            status: 503,
+            headers: { "content-type": "application/json" },
+          });
+        }
+        return json({
+          turn_id: "quickstart-turn-id",
+          final_response: "Completed revenue increased from January through March.",
+          sql_queries: ["SELECT month, revenue FROM demo_monthly_revenue"],
         });
       }
       throw new Error(`Unexpected local fixture request: ${method} ${requestUrl}`);

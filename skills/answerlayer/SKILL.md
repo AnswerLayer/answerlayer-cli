@@ -30,24 +30,16 @@ already available in the Codex skills directory.
    npm install -g @answerlayer/cli
    ```
 
-2. After confirmation, initialize the repository-free local runtime:
+2. Explain that quickstart may pull an image, start Docker containers, create a
+   persistent local volume, and install synthetic demo data. Get explicit user
+   confirmation, then run:
 
    ```bash
-   answerlayer local init
+   answerlayer local quickstart --yes --json
    ```
 
-   This checks Docker, pulls the supported public AnswerLayer image, pins its
-   immutable digest, and generates permission-restricted runtime configuration
-   in the platform application-data directory. It does not require Git, a
-   source checkout, registry credentials, or a model-provider key.
-
-3. After confirmation, start and configure the stack:
-
-   ```bash
-   answerlayer local start
-   ```
-
-   This starts Postgres, runs migrations, waits for readiness, creates the local
+   Never pass `--yes` before the user approves. This checks Docker, pulls and
+   pins the supported public image, starts Postgres, runs migrations, creates the local
    identity and scoped key, verifies it, and configures the CLI. It also seeds a
    versioned synthetic retail demo in a separate database, registers a
    dedicated read-only connection, creates starter semantic resources and a
@@ -55,48 +47,37 @@ already available in the Codex skills directory.
    credentials rather than printing them. Use `answerlayer local status` and
    `answerlayer local logs` to inspect progress. `local stop` preserves data;
    `local reset --force` is the explicit destructive reset. Use `--no-demo`
-   only when the user explicitly wants an empty instance.
+   only when the user explicitly wants an empty instance. Progress appears on
+   stderr; parse the single credential-free JSON object on stdout.
 
-4. Inspect the machine-readable demo handoff:
-
-   ```bash
-   answerlayer local demo --json
-   ```
-
-   Report the demo version, connection, verified result, and suggested next
-   action. Do not attempt a natural-language inquiry until a model provider is
-   configured. The demo saved query can be executed without a provider:
-
-   ```bash
-   answerlayer saved-queries execute <saved-query-id> --format table
-   ```
-
-5. When the user wants natural-language inquiry, hand provider setup back to
-   them. Ask them to run this command privately in their own terminal:
+3. If the JSON status is `provider-required`, report that the provider-free demo
+   succeeded and hand provider setup back to the user. Ask them to run this
+   privately in their own terminal:
 
    ```bash
    answerlayer local provider set anthropic
    ```
 
-   Do not ask the user to paste a provider key into chat and do not pass a key
-   in command arguments. The CLI disables terminal echo, stores the credential
-   in the selected runtime's permission-restricted environment, recreates only
-   the application container, and verifies the provider. For automation, the
-   user may place the key in a mode-0600 file and pass its path with
-   `--from-file`; do not read or print that file. After the user confirms the
-   command completed, inspect only secret-free status:
+   Never ask the user to paste the key into chat, never pass it as an argument,
+   and do not read a credential file. After the user confirms setup completed,
+   resume the same idempotent workflow without another state-change approval:
 
    ```bash
-   answerlayer local provider status --json
+   answerlayer local quickstart --yes --json
    ```
 
-6. Before connecting real data, require a dedicated database account that is
+   A `complete` status proves a real model-backed inquiry ran against the demo.
+   Report the local URL, verified question/result, and suggested next actions.
+   Repeating quickstart reuses the completed inquiry rather than creating a
+   duplicate session.
+
+4. Before connecting real data, require a dedicated database account that is
    restricted to approved schemas and `SELECT` only. Show the proposed
    connection host, database, and username, then get confirmation before
    running `connections create` or any query. Put the password only in a local,
    permission-restricted JSON file; never print it or commit it.
 
-7. Start with a small approved schema and read-only inspection. Confirm before
+5. Start with a small approved schema and read-only inspection. Confirm before
    creating connections, generating semantic objects, or executing queries.
 
 This workflow is for Docker Compose development only. Do not run
