@@ -97,7 +97,37 @@ This installs to `~/.codex/skills/answerlayer` by default. Use `--path` for a
 different skill directory; an existing skill is never replaced unless you pass
 `--force`.
 
-Initialize and start the local runtime:
+The recommended path is one command:
+
+```bash
+answerlayer local quickstart
+```
+
+Quickstart asks for confirmation before it changes local state, then initializes
+and starts the supported public-image runtime, authenticates the CLI, installs
+the deterministic demo, and verifies the provider-free demo query. If no model
+provider is configured, it stops with a safe handoff:
+
+```bash
+answerlayer local provider set anthropic
+answerlayer local quickstart
+```
+
+The provider command must be run privately in the user's own terminal. The
+resumed quickstart verifies the provider and runs one real model-backed inquiry
+against the demo. Successful inquiry details are retained in the local runtime
+state, so repeating quickstart reuses the verified session instead of creating
+duplicate demo resources or inquiry sessions.
+
+For agent automation after the user has explicitly approved starting
+containers, use `answerlayer local quickstart --yes --json`. Progress is written
+to stderr; stdout is one stable, credential-free JSON object containing the CLI
+version, image digest, runtime directory, demo and provider status, local URL,
+inquiry result, and next actions. `--yes` must not be used to bypass user
+approval.
+
+The underlying lifecycle commands remain available when manual control is
+needed:
 
 ```bash
 answerlayer local init
@@ -210,6 +240,7 @@ answerlayer health
 answerlayer openapi --output openapi.json
 answerlayer local init
 answerlayer local start
+answerlayer local quickstart --yes --json
 answerlayer local demo --json
 answerlayer local provider status --json
 answerlayer local status

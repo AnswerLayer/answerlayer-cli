@@ -1440,6 +1440,8 @@ function normalizeFlagName(rawName) {
     "--no-semantic-layer": "noSemanticLayer",
     "--no-demo": "noDemo",
     "--from-file": "fromFile",
+    "--yes": "yes",
+    "-y": "yes",
     "--options": "options",
     "--status": "status",
     "--summary": "summary",
@@ -1478,7 +1480,7 @@ function normalizeFlagName(rawName) {
 }
 
 function isBooleanFlag(rawName) {
-  return ["--json", "--help", "-h", "--include", "-i", "--raw", "--admin", "--force", "--follow", "--active", "--inactive", "--include-inactive", "--include-semantic-snapshot", "--use-semantic-layer", "--no-semantic-layer", "--no-demo"].includes(rawName);
+  return ["--json", "--help", "-h", "--include", "-i", "--raw", "--admin", "--force", "--follow", "--active", "--inactive", "--include-inactive", "--include-semantic-snapshot", "--use-semantic-layer", "--no-semantic-layer", "--no-demo", "--yes", "-y"].includes(rawName);
 }
 
 function setFlag(flags, name, value) {
@@ -1619,6 +1621,7 @@ Usage:
   answerlayer local start [--no-demo]
   answerlayer local status|logs|stop
   answerlayer local demo [--json]
+  answerlayer local quickstart [--yes] [--json]
   answerlayer local provider set|rotate anthropic [--from-file <mode-0600-path>]
   answerlayer local provider status|verify [anthropic] [--json]
   answerlayer local provider remove anthropic --force

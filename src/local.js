@@ -4,6 +4,7 @@ import net from "node:net";
 import os from "node:os";
 import path from "node:path";
 import { spawnSync } from "node:child_process";
+import { createInterface } from "node:readline/promises";
 import { AnswerLayerClient } from "./client.js";
 import { defaultConfigPath, readConfig, writeConfig } from "./config.js";
 
@@ -21,12 +22,14 @@ const LOCAL_DEMO_QUESTIONS = [
   "Which region generated the most completed revenue?",
   "How did completed revenue change from January to March?",
 ];
+const LOCAL_QUICKSTART_QUESTION = LOCAL_DEMO_QUESTIONS[0];
 const LOCAL_PROVIDERS = {
   anthropic: {
     label: "Anthropic",
     environmentName: "ANSWERLAYER_ANTHROPIC_API_KEY",
   },
 };
+const CLI_VERSION = JSON.parse(fs.readFileSync(new URL("../package.json", import.meta.url), "utf8")).version;
 
 export async function handleLocal(command, parsed, io) {
   if (command === "init") return localInit(parsed, io);
@@ -36,9 +39,10 @@ export async function handleLocal(command, parsed, io) {
   if (command === "stop") return localStop(parsed, io);
   if (command === "demo") return localDemo(parsed, io);
   if (command === "provider") return localProvider(parsed, io);
+  if (command === "quickstart") return localQuickstart(parsed, io);
   if (command === "upgrade") return localUpgrade(parsed, io);
   if (command === "reset") return localReset(parsed, io);
-  throw new Error("Expected `answerlayer local init|start|status|logs|stop|demo|provider|upgrade|reset`");
+  throw new Error("Expected `answerlayer local init|start|status|logs|stop|demo|provider|quickstart|upgrade|reset`");
 }
 
 export async function localUp(parsed, io) {
@@ -90,6 +94,70 @@ async function localStart(parsed, io) {
     write(io.stdout, "Demo: skipped (--no-demo)\n");
     write(io.stdout, "Install it later with: answerlayer local demo\n");
   }
+  return { runtime: { ...runtime, state }, baseUrl, configPath, demo };
+}
+
+async function localQuickstart(parsed, io) {
+  if (!(await confirmQuickstart(parsed, io))) {
+    throw new Error("Quickstart cancelled before making local runtime changes.");
+  }
+
+  const progressIo = { ...io, stdout: io.stderr };
+  const started = await localStart({
+    ...parsed,
+    flags: { ...parsed.flags, noDemo: false },
+  }, progressIo);
+  const { runtime, baseUrl, demo } = started;
+  const provider = resolveLocalProvider("anthropic");
+  const configured = Boolean(readEnvironment(runtime.envPath)[provider.environmentName]);
+  let providerStatus;
+
+  if (!configured) {
+    providerStatus = providerResult(provider, false, "ready", { verified: false, errorCode: "not-configured" });
+    const result = quickstartResult(runtime, demo, providerStatus, {
+      status: "not-run",
+      question: LOCAL_QUICKSTART_QUESTION,
+    });
+    persistQuickstart(runtime, { status: "provider-required", question: LOCAL_QUICKSTART_QUESTION });
+    printQuickstart(result, parsed, io);
+    return result;
+  }
+
+  const verification = validateProvider(runtime, io.runCommand || runCommand, provider);
+  providerStatus = providerResult(provider, true, "ready", verification);
+  if (!verification.verified) {
+    const result = quickstartResult(runtime, demo, providerStatus, {
+      status: "not-run",
+      question: LOCAL_QUICKSTART_QUESTION,
+    });
+    persistQuickstart(runtime, {
+      status: "provider-verification-failed",
+      question: LOCAL_QUICKSTART_QUESTION,
+      errorCode: verification.errorCode,
+    });
+    printQuickstart(result, parsed, io);
+    return result;
+  }
+
+  let inquiry = runtime.state.quickstart?.status === "complete"
+    && runtime.state.quickstart.question === LOCAL_QUICKSTART_QUESTION
+    && runtime.state.quickstart.connectionId === demo.connectionId
+    ? runtime.state.quickstart.inquiry
+    : null;
+  if (!inquiry) {
+    inquiry = await runQuickstartInquiry(baseUrl, demo.connectionId, io);
+    persistQuickstart(runtime, {
+      status: "complete",
+      question: LOCAL_QUICKSTART_QUESTION,
+      connectionId: demo.connectionId,
+      inquiry,
+      completedAt: new Date().toISOString(),
+    });
+  }
+
+  const result = quickstartResult(runtime, demo, providerStatus, inquiry);
+  printQuickstart(result, parsed, io);
+  return result;
 }
 
 async function localDemo(parsed, io) {
@@ -232,6 +300,7 @@ async function localStatus(parsed, io) {
     resolvedImage: runtime.state.resolvedImage,
     runtimeDirectory: runtime.directory,
     demo: runtime.state.demo || { status: "not-installed", version: LOCAL_DEMO_VERSION },
+    quickstart: runtime.state.quickstart || { status: "not-started", question: LOCAL_QUICKSTART_QUESTION },
     providers: localProviderConfiguration(runtime),
     services: status.services,
   };
@@ -245,6 +314,7 @@ async function localStatus(parsed, io) {
   write(io.stdout, `Image: ${result.resolvedImage}\n`);
   write(io.stdout, `Runtime config: ${result.runtimeDirectory}\n`);
   write(io.stdout, `Demo: ${result.demo.status} (${result.demo.version})\n`);
+  write(io.stdout, `Quickstart: ${result.quickstart.status}\n`);
   write(io.stdout, `Model provider: ${result.providers.anthropic.configured ? "anthropic (configured)" : "not configured"}\n`);
 }
 
@@ -283,6 +353,7 @@ async function localReset(parsed, io) {
   writeState(runtime.statePath, {
     ...runtime.state,
     demo: { status: "not-installed", version: LOCAL_DEMO_VERSION },
+    quickstart: { status: "not-started", question: LOCAL_QUICKSTART_QUESTION },
     lastStatus: "stopped",
     resetAt: new Date().toISOString(),
   });
@@ -324,6 +395,7 @@ async function ensureInitialized(parsed, io) {
     resolvedImage,
     port,
     ...(existingState?.demo ? { demo: existingState.demo } : {}),
+    ...(existingState?.quickstart ? { quickstart: existingState.quickstart } : {}),
     ...runtimeResourceNames(runtime.directory),
     createdAt: existingState?.createdAt || new Date().toISOString(),
     updatedAt: new Date().toISOString(),
@@ -714,6 +786,130 @@ function providerResult(provider, configured, runtimeStatus, verification) {
     runtimeStatus,
     ...(status === "verification-failed" ? { errorCode: verification.errorCode } : {}),
   };
+}
+
+async function confirmQuickstart(parsed, io) {
+  if (parsed.flags.yes) return true;
+  const prompt = "Quickstart may pull an image, start local containers, and create persistent demo data. Continue? [y/N] ";
+  if (io.confirm) return Boolean(await io.confirm(prompt));
+  if (!io.stdin?.isTTY) {
+    throw new Error("Quickstart requires confirmation before starting containers. Rerun interactively or use --yes only after the user approves.");
+  }
+  const terminal = createInterface({ input: io.stdin, output: io.stderr });
+  try {
+    const answer = await terminal.question(prompt);
+    return /^(?:y|yes)$/i.test(answer.trim());
+  } finally {
+    terminal.close();
+  }
+}
+
+async function runQuickstartInquiry(baseUrl, connectionId, io) {
+  const config = readConfig(io.env);
+  if (config.baseUrl !== baseUrl || !config.apiKey) {
+    throw new Error("Local CLI credentials are unavailable. Run `answerlayer local start` and retry quickstart.");
+  }
+  const client = new AnswerLayerClient({
+    baseUrl,
+    apiKey: config.apiKey,
+    fetchImpl: io.fetch || globalThis.fetch,
+  });
+  const catalog = await client.request("GET", "/api/v1/inquiry/models");
+  const model = catalog?.default_model;
+  if (!model) throw new Error("The local runtime did not return a default inquiry model.");
+  const session = await client.request("POST", "/api/v1/inquiry/sessions", {
+    body: { connection_id: connectionId, model, use_semantic_layer: true },
+  });
+  if (!session?.session_id) throw new Error("Quickstart inquiry did not return a session ID.");
+  const turn = await client.request(
+    "POST",
+    `/api/v1/inquiry/sessions/${encodeURIComponent(session.session_id)}/sync`,
+    { body: { user_input: LOCAL_QUICKSTART_QUESTION } },
+  );
+  if (!String(turn?.final_response || "").trim()) {
+    throw new Error("Quickstart inquiry completed without a model response. Check `answerlayer local logs answerlayer` and retry.");
+  }
+  return {
+    status: "verified",
+    sessionId: String(session.session_id),
+    turnId: turn.turn_id ? String(turn.turn_id) : null,
+    model,
+    question: LOCAL_QUICKSTART_QUESTION,
+    answer: String(turn.final_response),
+    sqlQueries: Array.isArray(turn.sql_queries) ? turn.sql_queries.map(String) : [],
+  };
+}
+
+function persistQuickstart(runtime, quickstart) {
+  const state = {
+    ...runtime.state,
+    quickstart,
+    updatedAt: new Date().toISOString(),
+  };
+  writeState(runtime.statePath, state);
+  runtime.state = state;
+}
+
+function quickstartResult(runtime, demo, provider, inquiry) {
+  const status = provider.status === "unconfigured"
+    ? "provider-required"
+    : provider.status !== "verified"
+      ? "provider-verification-failed"
+      : inquiry.status === "verified"
+        ? "complete"
+        : "inquiry-not-run";
+  return {
+    schemaVersion: 1,
+    status,
+    cliVersion: CLI_VERSION,
+    runtime: {
+      status: "ready",
+      url: `http://127.0.0.1:${runtime.state.port}`,
+      image: runtime.state.requestedImage,
+      resolvedImage: runtime.state.resolvedImage,
+      directory: runtime.directory,
+    },
+    demo: {
+      status: demo.status,
+      version: demo.version,
+      connectionId: demo.connectionId,
+      savedQueryId: demo.savedQueryId,
+      validation: demo.validation,
+    },
+    provider,
+    inquiry,
+    nextActions: status === "provider-required"
+      ? ["answerlayer local provider set anthropic", "answerlayer local quickstart"]
+      : status === "provider-verification-failed"
+        ? ["answerlayer local provider set anthropic", "answerlayer local quickstart"]
+        : LOCAL_DEMO_QUESTIONS.slice(1).map(question => `answerlayer inquiry ask --connection ${demo.connectionId} "${question}"`),
+  };
+}
+
+function printQuickstart(result, parsed, io) {
+  if (parsed.flags.json) {
+    write(io.stdout, `${JSON.stringify(result, null, 2)}\n`);
+    return;
+  }
+  write(io.stdout, `AnswerLayer quickstart: ${result.status}\n`);
+  write(io.stdout, `URL: ${result.runtime.url}\n`);
+  write(io.stdout, `Demo: ${result.demo.status} (${result.demo.version})\n`);
+  if (result.status === "provider-required") {
+    write(io.stdout, "A model provider is required for natural-language inquiry.\n");
+    write(io.stdout, "Enter the credential privately in your terminal: answerlayer local provider set anthropic\n");
+    write(io.stdout, "Then resume with: answerlayer local quickstart\n");
+    return;
+  }
+  if (result.status === "provider-verification-failed") {
+    write(io.stdout, `Provider verification failed: ${result.provider.errorCode}\n`);
+    write(io.stdout, "Repair it privately with: answerlayer local provider set anthropic\n");
+    return;
+  }
+  write(io.stdout, `Model inquiry verified with ${result.inquiry.model}.\n`);
+  write(io.stdout, `Question: ${result.inquiry.question}\n`);
+  write(io.stdout, `Answer: ${result.inquiry.answer}\n`);
+  write(io.stdout, `Session: ${result.inquiry.sessionId}\n`);
+  write(io.stdout, `Next: ${result.nextActions[0]}\n`);
 }
 
 function readState(statePath) {
