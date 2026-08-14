@@ -154,10 +154,12 @@ test("local init pulls the public image and pins its digest without Git or provi
 
   const state = JSON.parse(fs.readFileSync(path.join(fixture.runtimeDir, "state.json"), "utf8"));
   assert.equal(state.requestedImage, "public.ecr.aws/s8d9x7y7/answerlayer:1.20.3");
+  assert.equal(state.port, 8172);
   assert.equal(state.resolvedImage, fixture.resolvedImage);
   assert.equal(fs.statSync(path.join(fixture.runtimeDir, "runtime.env")).mode & 0o777, 0o600);
   assert.match(fs.readFileSync(path.join(fixture.runtimeDir, "runtime.env"), "utf8"), new RegExp(`ANSWERLAYER_IMAGE=${fixture.resolvedImage}`));
   assert.match(fs.readFileSync(path.join(fixture.runtimeDir, "compose.yaml"), "utf8"), /service_completed_successfully/);
+  assert.match(fs.readFileSync(path.join(fixture.runtimeDir, "compose.yaml"), "utf8"), /ANSWERLAYER_PORT:-8172}:8000/);
   assert.equal(fixture.commands.some(([command]) => command === "git" || command === "make"), false);
   assert.match(fixture.output.text(), /Local AnswerLayer is initialized/);
 });
@@ -180,7 +182,7 @@ test("local start reuses initialized state, starts the image stack, and configur
   const demoPassword = runtimeEnvironment.match(/ANSWERLAYER_DEMO_PASSWORD=(.+)/)[1];
   assert.equal(seedCommand[1].join(" ").includes(demoPassword), false);
   assert.deepEqual(JSON.parse(fs.readFileSync(fixture.configPath, "utf8")), {
-    baseUrl: "http://127.0.0.1:8000",
+    baseUrl: "http://127.0.0.1:8172",
     apiKey: "al_local_secret",
   });
   assert.doesNotMatch(fixture.output.text(), /al_local_secret/);
@@ -627,8 +629,18 @@ test("local start reports an occupied port before starting containers", async ()
   const fixture = localFixture({ portIsAvailable: false });
   await main(["local", "init"], fixture.io);
 
-  await assert.rejects(main(["local", "start"], fixture.io), /Port 8000 is already in use/);
+  await assert.rejects(main(["local", "start"], fixture.io), /Port 8172 is already in use/);
   assert.equal(fixture.commands.some(([, args]) => args.includes("up") && args.includes("--wait")), false);
+});
+
+test("local init preserves an existing explicit port when the CLI default changes", async () => {
+  const fixture = localFixture();
+  await main(["local", "init", "--port", "8000"], fixture.io);
+  await main(["local", "init"], fixture.io);
+
+  const state = JSON.parse(fs.readFileSync(path.join(fixture.runtimeDir, "state.json"), "utf8"));
+  assert.equal(state.port, 8000);
+  assert.match(fs.readFileSync(path.join(fixture.runtimeDir, "runtime.env"), "utf8"), /ANSWERLAYER_PORT=8000/);
 });
 
 test("local reset requires explicit confirmation and deletes only after --force", async () => {

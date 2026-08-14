@@ -136,7 +136,8 @@ answerlayer local start
 
 `local init` selects the CLI's supported public image by default. Use
 `--image <tag-or-digest>` to select a different published version and `--port`
-to change the local port. The CLI:
+to change the local port. Fresh runtimes use `http://127.0.0.1:8172`; existing
+runtimes keep their previously selected port. The CLI:
 
 1. Verifies Docker, its architecture and version, the port, and available disk.
 2. Pulls the public AnswerLayer image and pins its resolved immutable digest.
