@@ -573,6 +573,37 @@ test("interactive local quickstart securely configures the provider and proves f
   assert.equal(state.quickstart.status, "complete");
 });
 
+test("interactive local quickstart transitions from confirmations to hidden input on one terminal", async () => {
+  const fixture = localFixture();
+  const secret = "sk-ant-test-terminal-transition-secret";
+  fixture.psOutput = JSON.stringify({ Service: "answerlayer", State: "running", Health: "healthy", ExitCode: 0 });
+  const input = new PassThrough();
+  const rawModes = [];
+  input.isTTY = true;
+  input.isRaw = false;
+  input.setRawMode = value => {
+    rawModes.push(value);
+    input.isRaw = value;
+    return input;
+  };
+  fixture.io.stdin = input;
+
+  const quickstart = main(["local", "quickstart"], fixture.io);
+  await waitForText(fixture.errorOutput, /start local containers/);
+  input.write("y\n");
+  await waitForText(fixture.errorOutput, /Configure Anthropic now/);
+  input.write("\n");
+  await waitForText(fixture.errorOutput, /Anthropic API key:/);
+  input.write(`${secret}\n`);
+  await quickstart;
+
+  assert.deepEqual(rawModes, [true, false]);
+  assert.match(fixture.output.text(), /AnswerLayer quickstart: complete/);
+  assert.doesNotMatch(fixture.output.text(), new RegExp(secret));
+  assert.doesNotMatch(fixture.errorOutput.text(), new RegExp(secret));
+  assert.equal(input.isRaw, false);
+});
+
 test("interactive local quickstart allows provider setup to be deferred without another command", async () => {
   const fixture = localFixture();
   fixture.io.confirm = async () => true;
@@ -1472,6 +1503,14 @@ function readableStdin() {
   const stream = Readable.from([]);
   stream.isTTY = true;
   return stream;
+}
+
+async function waitForText(stream, pattern) {
+  for (let attempt = 0; attempt < 100; attempt += 1) {
+    if (pattern.test(stream.text())) return;
+    await new Promise(resolve => setImmediate(resolve));
+  }
+  throw new Error(`Timed out waiting for output matching ${pattern}`);
 }
 
 function localFixture(options = {}) {
