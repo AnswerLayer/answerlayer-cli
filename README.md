@@ -106,18 +106,17 @@ answerlayer local quickstart
 Quickstart asks for confirmation before it changes local state, then initializes
 and starts the supported public-image runtime, authenticates the CLI, installs
 the deterministic demo, and verifies the provider-free demo query. If no model
-provider is configured, it stops with a safe handoff:
+provider is configured during an interactive run, quickstart offers to collect
+the Anthropic key through a hidden terminal prompt, verifies it, and continues
+directly to one real model-backed inquiry. The key is never accepted as a
+command argument or printed to output. Successful inquiry details are retained
+in the local runtime state, so repeating quickstart reuses the verified session
+instead of creating duplicate demo resources or inquiry sessions.
 
-```bash
-answerlayer local provider set anthropic
-answerlayer local quickstart
-```
-
-The provider command must be run privately in the user's own terminal. The
-resumed quickstart verifies the provider and runs one real model-backed inquiry
-against the demo. Successful inquiry details are retained in the local runtime
-state, so repeating quickstart reuses the verified session instead of creating
-duplicate demo resources or inquiry sessions.
+The provider step can be declined and resumed later by rerunning the same
+`answerlayer local quickstart` command. Noninteractive `--json` runs never ask
+for secret input and instead return a credential-free `provider-required`
+handoff for an agent to report.
 
 For agent automation after the user has explicitly approved starting
 containers, use `answerlayer local quickstart --yes --json`. Progress is written

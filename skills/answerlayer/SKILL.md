@@ -32,13 +32,15 @@ already available in the Codex skills directory.
 
 2. Explain that quickstart may pull an image, start Docker containers, create a
    persistent local volume, and install synthetic demo data. Get explicit user
-   confirmation, then run:
+   confirmation. For an agent-controlled, noninteractive run, use:
 
    ```bash
    answerlayer local quickstart --yes --json
    ```
 
-   Never pass `--yes` before the user approves. This checks Docker, pulls and
+   Never pass `--yes` before the user approves. For a human directly using a
+   terminal, use `answerlayer local quickstart` instead so the CLI can offer
+   its own hidden provider-key prompt. Quickstart checks Docker, pulls and
    pins the supported public image, starts Postgres, runs migrations, creates the local
    identity and scoped key, verifies it, and configures the CLI. It also seeds a
    versioned synthetic retail demo in a separate database, registers a
@@ -50,17 +52,23 @@ already available in the Codex skills directory.
    only when the user explicitly wants an empty instance. Progress appears on
    stderr; parse the single credential-free JSON object on stdout.
 
-3. If the JSON status is `provider-required`, report that the provider-free demo
-   succeeded and hand provider setup back to the user. Ask them to run this
+3. For a human-led setup, run `answerlayer local quickstart` interactively. If
+   no provider is configured, the same command offers a hidden Anthropic-key
+   prompt, verifies the credential, and continues to the model-backed answer
+   without requiring a second command. Never ask the user to paste the key into
+   chat.
+
+   If an agent's noninteractive JSON run returns `provider-required`, report
+   that the provider-free demo succeeded and ask the user to resume quickstart
    privately in their own terminal:
 
    ```bash
-   answerlayer local provider set anthropic
+   answerlayer local quickstart
    ```
 
-   Never ask the user to paste the key into chat, never pass it as an argument,
-   and do not read a credential file. After the user confirms setup completed,
-   resume the same idempotent workflow without another state-change approval:
+   Never pass the key as an argument and do not read a credential file. After
+   the user confirms setup completed, inspect the same idempotent workflow
+   without another state-change approval:
 
    ```bash
    answerlayer local quickstart --yes --json
