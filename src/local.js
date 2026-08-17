@@ -109,8 +109,13 @@ async function localQuickstart(parsed, io) {
   }, progressIo);
   const { runtime, baseUrl, demo } = started;
   const provider = resolveLocalProvider("anthropic");
-  const configured = Boolean(readEnvironment(runtime.envPath)[provider.environmentName]);
+  let configured = Boolean(readEnvironment(runtime.envPath)[provider.environmentName]);
   let providerStatus;
+
+  if (!configured && await confirmQuickstartProvider(parsed, io, provider)) {
+    await localProviderSet(parsed, io, provider, "set");
+    configured = true;
+  }
 
   if (!configured) {
     providerStatus = providerResult(provider, false, "ready", { verified: false, errorCode: "not-configured" });
@@ -804,6 +809,20 @@ async function confirmQuickstart(parsed, io) {
   }
 }
 
+async function confirmQuickstartProvider(parsed, io, provider) {
+  if (parsed.flags.json) return false;
+  const prompt = `Configure ${provider.label} now to run a model-backed answer? [Y/n] `;
+  if (io.confirmProvider) return Boolean(await io.confirmProvider(prompt));
+  if (!io.stdin?.isTTY) return false;
+  const terminal = createInterface({ input: io.stdin, output: io.stderr });
+  try {
+    const answer = await terminal.question(prompt);
+    return !/^(?:n|no)$/i.test(answer.trim());
+  } finally {
+    terminal.close();
+  }
+}
+
 async function runQuickstartInquiry(baseUrl, connectionId, io) {
   const config = readConfig(io.env);
   if (config.baseUrl !== baseUrl || !config.apiKey) {
@@ -896,8 +915,7 @@ function printQuickstart(result, parsed, io) {
   write(io.stdout, `Demo: ${result.demo.status} (${result.demo.version})\n`);
   if (result.status === "provider-required") {
     write(io.stdout, "A model provider is required for natural-language inquiry.\n");
-    write(io.stdout, "Enter the credential privately in your terminal: answerlayer local provider set anthropic\n");
-    write(io.stdout, "Then resume with: answerlayer local quickstart\n");
+    write(io.stdout, "Rerun answerlayer local quickstart in your terminal when ready; it will prompt for the credential without displaying it.\n");
     return;
   }
   if (result.status === "provider-verification-failed") {

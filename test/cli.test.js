@@ -520,6 +520,9 @@ test("local quickstart confirms changes and returns an actionable provider hando
     assert.match(prompt, /start local containers/);
     return true;
   };
+  fixture.io.confirmProvider = async () => {
+    throw new Error("JSON quickstart must not request interactive provider input");
+  };
 
   await main(["local", "quickstart", "--json"], fixture.io);
 
@@ -539,6 +542,78 @@ test("local quickstart confirms changes and returns an actionable provider hando
   assert.doesNotMatch(fixture.output.text(), /al_local_secret/);
   const state = JSON.parse(fs.readFileSync(path.join(fixture.runtimeDir, "state.json"), "utf8"));
   assert.equal(state.quickstart.status, "provider-required");
+});
+
+test("interactive local quickstart securely configures the provider and proves first value in one command", async () => {
+  const fixture = localFixture();
+  const secret = "sk-ant-test-integrated-quickstart-secret";
+  fixture.psOutput = JSON.stringify({ Service: "answerlayer", State: "running", Health: "healthy", ExitCode: 0 });
+  fixture.io.confirm = async () => true;
+  fixture.io.confirmProvider = async prompt => {
+    assert.match(prompt, /Configure Anthropic now/);
+    return true;
+  };
+  fixture.io.readSecret = async prompt => {
+    assert.equal(prompt, "Anthropic API key: ");
+    return secret;
+  };
+
+  await main(["local", "quickstart"], fixture.io);
+
+  assert.match(fixture.output.text(), /credential configured and verified/);
+  assert.match(fixture.output.text(), /AnswerLayer quickstart: complete/);
+  assert.match(fixture.output.text(), /Model inquiry verified with claude-sonnet-4-6/);
+  assert.doesNotMatch(fixture.output.text(), new RegExp(secret));
+  assert.doesNotMatch(fixture.errorOutput.text(), new RegExp(secret));
+  assert.match(fs.readFileSync(path.join(fixture.runtimeDir, "runtime.env"), "utf8"), new RegExp(secret));
+  assert.doesNotMatch(fs.readFileSync(path.join(fixture.runtimeDir, "state.json"), "utf8"), new RegExp(secret));
+  assert.equal(fixture.apiRequests.filter(request => request.pathname === "/api/v1/inquiry/sessions").length, 1);
+  assert.equal(fixture.apiRequests.filter(request => request.pathname.endsWith("/sync")).length, 1);
+  const state = JSON.parse(fs.readFileSync(path.join(fixture.runtimeDir, "state.json"), "utf8"));
+  assert.equal(state.quickstart.status, "complete");
+});
+
+test("interactive local quickstart transitions from confirmations to hidden input on one terminal", async () => {
+  const fixture = localFixture();
+  const secret = "sk-ant-test-terminal-transition-secret";
+  fixture.psOutput = JSON.stringify({ Service: "answerlayer", State: "running", Health: "healthy", ExitCode: 0 });
+  const input = new PassThrough();
+  const rawModes = [];
+  input.isTTY = true;
+  input.isRaw = false;
+  input.setRawMode = value => {
+    rawModes.push(value);
+    input.isRaw = value;
+    return input;
+  };
+  fixture.io.stdin = input;
+
+  const quickstart = main(["local", "quickstart"], fixture.io);
+  await waitForText(fixture.errorOutput, /start local containers/);
+  input.write("y\n");
+  await waitForText(fixture.errorOutput, /Configure Anthropic now/);
+  input.write("\n");
+  await waitForText(fixture.errorOutput, /Anthropic API key:/);
+  input.write(`${secret}\n`);
+  await quickstart;
+
+  assert.deepEqual(rawModes, [true, false]);
+  assert.match(fixture.output.text(), /AnswerLayer quickstart: complete/);
+  assert.doesNotMatch(fixture.output.text(), new RegExp(secret));
+  assert.doesNotMatch(fixture.errorOutput.text(), new RegExp(secret));
+  assert.equal(input.isRaw, false);
+});
+
+test("interactive local quickstart allows provider setup to be deferred without another command", async () => {
+  const fixture = localFixture();
+  fixture.io.confirm = async () => true;
+  fixture.io.confirmProvider = async () => false;
+
+  await main(["local", "quickstart"], fixture.io);
+
+  assert.match(fixture.output.text(), /AnswerLayer quickstart: provider-required/);
+  assert.match(fixture.output.text(), /Rerun answerlayer local quickstart in your terminal/);
+  assert.doesNotMatch(fixture.output.text(), /provider set anthropic/);
 });
 
 test("local quickstart resumes after provider setup and runs one real inquiry", async () => {
@@ -1428,6 +1503,14 @@ function readableStdin() {
   const stream = Readable.from([]);
   stream.isTTY = true;
   return stream;
+}
+
+async function waitForText(stream, pattern) {
+  for (let attempt = 0; attempt < 100; attempt += 1) {
+    if (pattern.test(stream.text())) return;
+    await new Promise(resolve => setImmediate(resolve));
+  }
+  throw new Error(`Timed out waiting for output matching ${pattern}`);
 }
 
 function localFixture(options = {}) {
