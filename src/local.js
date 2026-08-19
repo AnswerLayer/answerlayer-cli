@@ -795,7 +795,14 @@ function providerResult(provider, configured, runtimeStatus, verification) {
 
 async function confirmQuickstart(parsed, io) {
   if (parsed.flags.yes) return true;
-  const prompt = "Quickstart may pull an image, start local containers, and create persistent demo data. Continue? [y/N] ";
+  const prompt = [
+    "Quick Start will:",
+    "  - Pull the AnswerLayer container image",
+    "  - Start local containers",
+    "  - Create persistent demo data",
+    "",
+    "Continue? [y/N] ",
+  ].join("\n");
   if (io.confirm) return Boolean(await io.confirm(prompt));
   if (!io.stdin?.isTTY) {
     throw new Error("Quickstart requires confirmation before starting containers. Rerun interactively or use --yes only after the user approves.");
