@@ -517,7 +517,11 @@ test("local provider removal is explicit and preserves the database volume", asy
 test("local quickstart confirms changes and returns an actionable provider handoff", async () => {
   const fixture = localFixture();
   fixture.io.confirm = async prompt => {
-    assert.match(prompt, /start local containers/);
+    assert.match(prompt, /^Quick Start will:/);
+    assert.match(prompt, /- Pull the AnswerLayer container image/);
+    assert.match(prompt, /- Start local containers/);
+    assert.match(prompt, /- Create persistent demo data/);
+    assert.match(prompt, /Continue\? \[y\/N\] $/);
     return true;
   };
   fixture.io.confirmProvider = async () => {
@@ -589,7 +593,7 @@ test("interactive local quickstart transitions from confirmations to hidden inpu
   fixture.io.stdin = input;
 
   const quickstart = main(["local", "quickstart"], fixture.io);
-  await waitForText(fixture.errorOutput, /start local containers/);
+  await waitForText(fixture.errorOutput, /Quick Start will:/);
   input.write("y\n");
   await waitForText(fixture.errorOutput, /Configure Anthropic now/);
   input.write("\n");
