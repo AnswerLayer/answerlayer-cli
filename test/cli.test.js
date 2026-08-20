@@ -551,6 +551,8 @@ test("local quickstart confirms changes and returns an actionable provider hando
 test("interactive local quickstart securely configures the provider and proves first value in one command", async () => {
   const fixture = localFixture();
   const secret = "sk-ant-test-integrated-quickstart-secret";
+  const fetchImpl = fixture.io.fetch;
+  let restartReadinessChecks = 0;
   fixture.psOutput = JSON.stringify({ Service: "answerlayer", State: "running", Health: "healthy", ExitCode: 0 });
   fixture.io.confirm = async () => true;
   fixture.io.confirmProvider = async prompt => {
@@ -561,9 +563,24 @@ test("interactive local quickstart securely configures the provider and proves f
     assert.equal(prompt, "Anthropic API key: ");
     return secret;
   };
+  fixture.io.fetch = async (url, init) => {
+    const requestUrl = new URL(String(url));
+    const providerRestarted = fixture.commands.some(([, args]) => args.includes("--force-recreate"));
+    if (requestUrl.pathname === "/readyz" && providerRestarted) {
+      restartReadinessChecks += 1;
+      if (restartReadinessChecks === 1) {
+        return new Response(JSON.stringify({ status: "starting" }), { status: 503 });
+      }
+    }
+    if (requestUrl.pathname === "/api/v1/inquiry/models") {
+      assert.equal(restartReadinessChecks, 2);
+    }
+    return fetchImpl(url, init);
+  };
 
   await main(["local", "quickstart"], fixture.io);
 
+  assert.equal(restartReadinessChecks, 2);
   assert.match(fixture.output.text(), /credential configured and verified/);
   assert.match(fixture.output.text(), /AnswerLayer quickstart: complete/);
   assert.match(fixture.output.text(), /Model inquiry verified with claude-sonnet-4-6/);

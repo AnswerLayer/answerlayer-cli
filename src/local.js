@@ -218,6 +218,7 @@ async function localProviderSet(parsed, io, provider, action) {
   writeEnvironmentValue(runtime.envPath, provider.environmentName, secret);
   try {
     restartProviderRuntime(runtime, run);
+    await waitUntilReady(`http://127.0.0.1:${runtime.state.port}`, io);
   } catch {
     rollbackProviderCredential(runtime, run, provider, existingSecret, "updating");
     throw new Error(`Could not restart AnswerLayer with the new ${provider.label} credential. The previous configuration was restored.`);
