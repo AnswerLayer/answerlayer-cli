@@ -1168,7 +1168,7 @@ function evalCasePayload(flags) {
     expected_answer: firstValue(flags.expectedAnswer),
     expected_sql: firstValue(flags.expectedSql) || firstValue(flags.sql),
     expected_values: parseJsonFlag(firstValue(flags.expectedValues), "expected-values"),
-    oracle_sources: parseJsonFlag(firstValue(flags.oracleSources), "oracle-sources"),
+    oracle_sources: parseJsonArrayFlag(firstValue(flags.oracleSources), "oracle-sources"),
     required_tools: optionalCsvOrRepeated(flags.requiredTool),
     forbidden_tools: optionalCsvOrRepeated(flags.forbiddenTool),
     tags: optionalCsvOrRepeated(flags.tag),
@@ -1498,6 +1498,15 @@ function parseJsonFlag(value, name) {
   } catch (error) {
     throw usage(`Invalid JSON for --${name}: ${error.message}`);
   }
+}
+
+function parseJsonArrayFlag(value, name) {
+  const parsed = parseJsonFlag(value, name);
+  if (parsed === undefined) return undefined;
+  if (!Array.isArray(parsed)) {
+    throw usage(`Expected --${name} to be a JSON array`);
+  }
+  return parsed;
 }
 
 function parseInteger(value, fallback) {
