@@ -1168,6 +1168,7 @@ function evalCasePayload(flags) {
     expected_answer: firstValue(flags.expectedAnswer),
     expected_sql: firstValue(flags.expectedSql) || firstValue(flags.sql),
     expected_values: parseJsonFlag(firstValue(flags.expectedValues), "expected-values"),
+    oracle_sources: parseJsonFlag(firstValue(flags.oracleSources), "oracle-sources"),
     required_tools: optionalCsvOrRepeated(flags.requiredTool),
     forbidden_tools: optionalCsvOrRepeated(flags.forbiddenTool),
     tags: optionalCsvOrRepeated(flags.tag),
@@ -1458,6 +1459,7 @@ function normalizeFlagName(rawName) {
     "--expected-answer": "expectedAnswer",
     "--expected-sql": "expectedSql",
     "--expected-values": "expectedValues",
+    "--oracle-sources": "oracleSources",
     "--required-tool": "requiredTool",
     "--forbidden-tool": "forbiddenTool",
     "--tag": "tag",
@@ -1646,7 +1648,8 @@ Data products:
   answerlayer evals suites list|create|get|update|delete
   answerlayer evals cases create|update|delete
   answerlayer evals runs list|create|create-batch|get|update|cancel|compare|analyze
-    case create/update accept --category <name>
+    case create/update accept --category <name> and
+    --oracle-sources '<JSON array>'
     run create accepts --case <case-id> (repeat or comma-separate) and
     --category <name> (repeat; category and case selectors are unioned),
     --concurrency <1-8> (default 3; 1 is serial), and

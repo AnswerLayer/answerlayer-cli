@@ -1061,6 +1061,13 @@ test("evals cases create accepts evaluator flags and repeated constraints", asyn
       category: "Revenue",
       expected_sql: "select sum(amount) from orders",
       expected_values: [1200, "USD"],
+      oracle_sources: [
+        {
+          kind: "external",
+          title: "Revenue definition",
+          url: "https://example.com/revenue",
+        },
+      ],
       required_tools: ["query_database", "format_answer"],
       forbidden_tools: ["web_search"],
       tags: ["revenue", "critical"],
@@ -1084,6 +1091,7 @@ test("evals cases create accepts evaluator flags and repeated constraints", asyn
       "--category", "Revenue",
       "--expected-sql", "select sum(amount) from orders",
       "--expected-values", '[1200,"USD"]',
+      "--oracle-sources", '[{"kind":"external","title":"Revenue definition","url":"https://example.com/revenue"}]',
       "--required-tool", "query_database,format_answer",
       "--forbidden-tool", "web_search",
       "--tag", "revenue",
