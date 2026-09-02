@@ -1061,6 +1061,13 @@ test("evals cases create accepts evaluator flags and repeated constraints", asyn
       category: "Revenue",
       expected_sql: "select sum(amount) from orders",
       expected_values: [1200, "USD"],
+      oracle_sources: [
+        {
+          kind: "external",
+          title: "Revenue definition",
+          url: "https://example.com/revenue",
+        },
+      ],
       required_tools: ["query_database", "format_answer"],
       forbidden_tools: ["web_search"],
       tags: ["revenue", "critical"],
@@ -1084,6 +1091,7 @@ test("evals cases create accepts evaluator flags and repeated constraints", asyn
       "--category", "Revenue",
       "--expected-sql", "select sum(amount) from orders",
       "--expected-values", '[1200,"USD"]',
+      "--oracle-sources", '[{"kind":"external","title":"Revenue definition","url":"https://example.com/revenue"}]',
       "--required-tool", "query_database,format_answer",
       "--forbidden-tool", "web_search",
       "--tag", "revenue",
@@ -1102,6 +1110,33 @@ test("evals cases create accepts evaluator flags and repeated constraints", asyn
   }
 
   assert.deepEqual(JSON.parse(output.text()), { id: "case-1" });
+});
+
+test("evals cases reject non-array oracle sources before calling the API", async () => {
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async () => assert.fail("API should not be called");
+
+  try {
+    await assert.rejects(
+      main([
+        "evals", "cases", "create", "suite-1",
+        "--base-url", "https://answerlayer.example",
+        "--api-key", "al_live_test",
+        "--title", "Monthly revenue",
+        "--question", "What was revenue last month?",
+        "--expected-answer", "Revenue was 1200",
+        "--oracle-sources", '{"kind":"external"}',
+      ], {
+        env: {},
+        stdin: readableStdin(),
+        stdout: captureStream(),
+        stderr: captureStream(),
+      }),
+      /Expected --oracle-sources to be a JSON array/,
+    );
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
 });
 
 test("evals cases update accepts a category", async () => {

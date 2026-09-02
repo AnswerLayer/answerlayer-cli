@@ -1168,6 +1168,7 @@ function evalCasePayload(flags) {
     expected_answer: firstValue(flags.expectedAnswer),
     expected_sql: firstValue(flags.expectedSql) || firstValue(flags.sql),
     expected_values: parseJsonFlag(firstValue(flags.expectedValues), "expected-values"),
+    oracle_sources: parseJsonArrayFlag(firstValue(flags.oracleSources), "oracle-sources"),
     required_tools: optionalCsvOrRepeated(flags.requiredTool),
     forbidden_tools: optionalCsvOrRepeated(flags.forbiddenTool),
     tags: optionalCsvOrRepeated(flags.tag),
@@ -1458,6 +1459,7 @@ function normalizeFlagName(rawName) {
     "--expected-answer": "expectedAnswer",
     "--expected-sql": "expectedSql",
     "--expected-values": "expectedValues",
+    "--oracle-sources": "oracleSources",
     "--required-tool": "requiredTool",
     "--forbidden-tool": "forbiddenTool",
     "--tag": "tag",
@@ -1496,6 +1498,15 @@ function parseJsonFlag(value, name) {
   } catch (error) {
     throw usage(`Invalid JSON for --${name}: ${error.message}`);
   }
+}
+
+function parseJsonArrayFlag(value, name) {
+  const parsed = parseJsonFlag(value, name);
+  if (parsed === undefined) return undefined;
+  if (!Array.isArray(parsed)) {
+    throw usage(`Expected --${name} to be a JSON array`);
+  }
+  return parsed;
 }
 
 function parseInteger(value, fallback) {
@@ -1646,7 +1657,8 @@ Data products:
   answerlayer evals suites list|create|get|update|delete
   answerlayer evals cases create|update|delete
   answerlayer evals runs list|create|create-batch|get|update|cancel|compare|analyze
-    case create/update accept --category <name>
+    case create/update accept --category <name> and
+    --oracle-sources '<JSON array>'
     run create accepts --case <case-id> (repeat or comma-separate) and
     --category <name> (repeat; category and case selectors are unioned),
     --concurrency <1-8> (default 3; 1 is serial), and
