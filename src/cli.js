@@ -648,6 +648,7 @@ async function handleEvals(client, resource, positionals, parsed, io) {
         body: await readData(parsed.flags, io, { ...evalCasePayload(parsed.flags), is_active: activeFlag(parsed.flags) }),
       });
     }
+    if (command === "reveal") return requestAndPrint(client, "POST", `${base}/cases/${encodeURIComponent(caseId)}/reveal`, parsed, io);
     if (command === "delete") return requestAndPrint(client, "DELETE", `${base}/cases/${encodeURIComponent(caseId)}`, parsed, io);
     throw usage(`Unknown evals cases command: ${command}`);
   }
@@ -739,7 +740,14 @@ async function handleGeneration(client, command, positionals, parsed, io) {
   const base = "/api/v1/semantic/jobs";
   if (command === "start" || command === "create") {
     return requestAndPrint(client, "POST", base, parsed, io, {
-      body: await readData(parsed.flags, io),
+      body: await readData(parsed.flags, io, {
+        connection_id: firstValue(parsed.flags.connection),
+        component_type: firstValue(parsed.flags.componentType),
+        prompt: firstValue(parsed.flags.prompt),
+        model: firstValue(parsed.flags.model),
+        eval_suite_id: firstValue(parsed.flags.evalSuite),
+        eval_case_ids: optionalCsvOrRepeated(parsed.flags.evalCase),
+      }),
     });
   }
   if (command === "list" || !command) {
@@ -1165,6 +1173,7 @@ function evalCasePayload(flags) {
     title: firstValue(flags.title),
     question: firstValue(flags.question),
     category: firstValue(flags.category),
+    partition: firstValue(flags.partition),
     expected_answer: firstValue(flags.expectedAnswer),
     expected_sql: firstValue(flags.expectedSql) || firstValue(flags.sql),
     expected_values: parseJsonFlag(firstValue(flags.expectedValues), "expected-values"),
@@ -1437,6 +1446,7 @@ function normalizeFlagName(rawName) {
     "--h": "h",
     "--prompt": "prompt",
     "--model": "model",
+    "--component-type": "componentType",
     "--use-semantic-layer": "useSemanticLayer",
     "--no-semantic-layer": "noSemanticLayer",
     "--no-demo": "noDemo",
@@ -1455,7 +1465,12 @@ function normalizeFlagName(rawName) {
     "--baseline-run": "baseline",
     "--case": "case",
     "--case-id": "case",
+    "--eval-suite": "evalSuite",
+    "--eval-suite-id": "evalSuite",
+    "--eval-case": "evalCase",
+    "--eval-case-id": "evalCase",
     "--category": "category",
+    "--partition": "partition",
     "--expected-answer": "expectedAnswer",
     "--expected-sql": "expectedSql",
     "--expected-values": "expectedValues",
@@ -1655,9 +1670,10 @@ Data products:
   answerlayer semantic <entities|relationships|measures|metrics|dimensions|filters> list|get|create|update|delete|delete-all|generate
   answerlayer inquiry models|ask|sessions|create-session|session|update-session|delete-session|turn
   answerlayer evals suites list|create|get|update|delete
-  answerlayer evals cases create|update|delete
+  answerlayer evals cases create|update|reveal|delete
   answerlayer evals runs list|create|create-batch|get|update|cancel|compare|analyze
-    case create/update accept --category <name> and
+    case create/update accept --category <name>,
+    --partition <authoring|holdout|adversarial>, and
     --oracle-sources '<JSON array>'
     run create accepts --case <case-id> (repeat or comma-separate) and
     --category <name> (repeat; category and case selectors are unioned),
@@ -1668,6 +1684,9 @@ Data products:
     and --use-semantic-layer or --no-semantic-layer
     update accepts --label <name>
   answerlayer generation start|list|get|status|stream|cancel|questions|guidance|delete
+    start accepts --connection, --component-type, --prompt, --model,
+    --eval-suite, and repeatable or comma-separated --eval-case values;
+    only authoring cases are accepted as generation context
   answerlayer tiles list|get|create|update|data|delete
   answerlayer dashboards list|get|create|update|delete|duplicate|manifest|attach-tile|move-tile|detach-tile|assignments|assign|unassign|tile-data
 

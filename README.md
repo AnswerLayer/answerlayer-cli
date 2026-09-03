@@ -271,6 +271,8 @@ answerlayer inquiry ask --connection <connection-id> --model claude-opus-4-6 "In
 
 answerlayer evals suites create --name "Revenue checks" --connection <connection-id>
 answerlayer evals cases create <suite-id> --title "Monthly revenue" --question "What was revenue last month?" --category Revenue --expected-sql "select sum(amount) from orders where ..." --oracle-sources '[{"kind":"external","title":"Revenue policy","url":"https://example.com/revenue-policy"}]'
+answerlayer evals cases create <suite-id> --title "Unseen revenue check" --question "How much revenue did we make?" --partition holdout --expected-sql "select sum(amount) from orders"
+answerlayer evals cases reveal <case-id> --json # admin-only, explicit, and audited
 answerlayer evals runs create <suite-id> --label "Before prompt change"
 answerlayer evals runs create <suite-id> --case <case-id> --case <case-id> --label "Focused smoke run"
 answerlayer evals runs create <suite-id> --category Revenue --category Finance --case <case-id> --label "Focused category run"
@@ -280,6 +282,7 @@ answerlayer evals runs create-batch --suite <suite-id> --suite <suite-id> --conc
 answerlayer evals runs update <run-id> --label "Prompt experiment B"
 answerlayer evals runs compare <run-id> --baseline <baseline-run-id>
 answerlayer evals runs analyze <run-id> --json
+answerlayer generation start --connection <connection-id> --component-type metrics --eval-suite <suite-id> --eval-case <authoring-case-id> --prompt "Improve these concepts"
 
 answerlayer dashboards create --title "Executive overview" --visibility org
 answerlayer tiles create --title "Revenue" --source-type saved_query --source <saved-query-id>

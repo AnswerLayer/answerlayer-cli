@@ -1059,6 +1059,7 @@ test("evals cases create accepts evaluator flags and repeated constraints", asyn
       title: "Monthly revenue",
       question: "What was revenue last month?",
       category: "Revenue",
+      partition: "holdout",
       expected_sql: "select sum(amount) from orders",
       expected_values: [1200, "USD"],
       oracle_sources: [
@@ -1089,6 +1090,7 @@ test("evals cases create accepts evaluator flags and repeated constraints", asyn
       "--title", "Monthly revenue",
       "--question", "What was revenue last month?",
       "--category", "Revenue",
+      "--partition", "holdout",
       "--expected-sql", "select sum(amount) from orders",
       "--expected-values", '[1200,"USD"]',
       "--oracle-sources", '[{"kind":"external","title":"Revenue definition","url":"https://example.com/revenue"}]',
@@ -1170,6 +1172,88 @@ test("evals cases update accepts a category", async () => {
   }
 
   assert.deepEqual(JSON.parse(output.text()), { id: "case-1", category: "Finance" });
+});
+
+test("evals cases reveal discloses an oracle through the audited endpoint", async () => {
+  const originalFetch = globalThis.fetch;
+  const output = captureStream();
+
+  globalThis.fetch = async (url, init) => {
+    assert.equal(String(url), "https://answerlayer.example/api/v1/evals/cases/case-1/reveal");
+    assert.equal(init.method, "POST");
+    return new Response(JSON.stringify({
+      id: "case-1",
+      partition: "holdout",
+      oracle_redacted: false,
+      expected_answer: "Revenue was 1200",
+    }), {
+      status: 200,
+      headers: { "content-type": "application/json" },
+    });
+  };
+
+  try {
+    await main([
+      "evals", "cases", "reveal", "case-1",
+      "--base-url", "https://answerlayer.example",
+      "--api-key", "al_live_test",
+    ], {
+      env: {},
+      stdin: readableStdin(),
+      stdout: output,
+      stderr: captureStream(),
+    });
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+
+  assert.equal(JSON.parse(output.text()).expected_answer, "Revenue was 1200");
+});
+
+test("generation start accepts authoring eval context flags", async () => {
+  const originalFetch = globalThis.fetch;
+  const output = captureStream();
+
+  globalThis.fetch = async (url, init) => {
+    assert.equal(String(url), "https://answerlayer.example/api/v1/semantic/jobs");
+    assert.equal(init.method, "POST");
+    assert.deepEqual(JSON.parse(init.body), {
+      connection_id: "connection-1",
+      component_type: "metrics",
+      prompt: "Improve habitability concepts",
+      model: "luna",
+      eval_suite_id: "suite-1",
+      eval_case_ids: ["case-1", "case-2", "case-3"],
+    });
+    return new Response(JSON.stringify({ id: "job-1", status: "queued" }), {
+      status: 201,
+      headers: { "content-type": "application/json" },
+    });
+  };
+
+  try {
+    await main([
+      "generation", "start",
+      "--base-url", "https://answerlayer.example",
+      "--api-key", "al_live_test",
+      "--connection", "connection-1",
+      "--component-type", "metrics",
+      "--prompt", "Improve habitability concepts",
+      "--model", "luna",
+      "--eval-suite", "suite-1",
+      "--eval-case", "case-1,case-2",
+      "--eval-case-id", "case-3",
+    ], {
+      env: {},
+      stdin: readableStdin(),
+      stdout: output,
+      stderr: captureStream(),
+    });
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+
+  assert.deepEqual(JSON.parse(output.text()), { id: "job-1", status: "queued" });
 });
 
 test("evals runs create sends selected case IDs", async () => {
