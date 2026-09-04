@@ -1763,9 +1763,10 @@ Data products:
     and --use-semantic-layer or --no-semantic-layer
     update accepts --label <name>
   answerlayer ontologies list|create|get|validate
+    validate accepts --file <ontology.tff>, --tff <source>, or stdin
   answerlayer ontologies version create|validate|review|freeze|export
-    create accepts an ontology id, --file <ontology.tff>, and optional
-    --predecessor <version-id>; validate accepts --file or stdin
+    version create accepts an ontology id, --file <ontology.tff>, --tff <source>,
+    or stdin, plus optional --predecessor <version-id>
   answerlayer generation start|list|get|status|stream|cancel|questions|guidance|delete
     start accepts --connection, --component-type, --prompt, --model,
     --eval-suite, and repeatable or comma-separated --eval-case values;
