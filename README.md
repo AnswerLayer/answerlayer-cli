@@ -284,6 +284,13 @@ answerlayer evals runs compare <run-id> --baseline <baseline-run-id>
 answerlayer evals runs analyze <run-id> --json
 answerlayer generation start --connection <connection-id> --component-type metrics --eval-suite <suite-id> --eval-case <authoring-case-id> --prompt "Improve these concepts"
 
+answerlayer ontologies create --domain-key exoplanet-archive --name "Exoplanet Archive"
+answerlayer ontologies version create <ontology-id> --file ./ontology.tff
+answerlayer ontologies version validate <version-id>
+answerlayer ontologies version review <version-id>   # admin-only
+answerlayer ontologies version freeze <version-id>   # admin-only
+answerlayer ontologies version export <version-id> --output ./ontology.tff
+
 answerlayer dashboards create --title "Executive overview" --visibility org
 answerlayer tiles create --title "Revenue" --source-type saved_query --source <saved-query-id>
 answerlayer dashboards attach-tile <dashboard-id> --tile <tile-id> --x 0 --y 0 --w 6 --h 4
@@ -307,7 +314,7 @@ answerlayer branding update --data-file ./branding.json
 ## Command groups
 
 - Core: `api-keys`, `connections`, `metadata`, `query`, `query-results`
-- Data products: `saved-queries`, `semantic`, `inquiry`, `evals`, `generation`, `tiles`, `dashboards`
+- Data products: `saved-queries`, `semantic`, `inquiry`, `evals`, `ontologies`, `generation`, `tiles`, `dashboards`
 - Supporting resources: `documents`, `branding`, `uploads`, `chains`, `users`, `org`, `roles`, `billing`, `stats`
 
 ## Development

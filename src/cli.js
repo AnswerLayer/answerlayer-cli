@@ -56,6 +56,7 @@ export async function main(argv, io) {
   if (group === "semantic") return handleSemantic(client, command, positionals, parsed, io);
   if (group === "inquiry") return handleInquiry(client, command, positionals, parsed, io);
   if (group === "evals" || group === "evaluations") return handleEvals(client, command, positionals, parsed, io);
+  if (group === "ontologies" || group === "ontology") return handleOntologies(client, command, positionals, parsed, io);
   if (group === "generation") return handleGeneration(client, command, positionals, parsed, io);
   if (group === "tiles") return handleTiles(client, command, positionals, parsed, io);
   if (group === "dashboards") return handleDashboards(client, command, positionals, parsed, io);
@@ -736,6 +737,69 @@ async function handleEvals(client, resource, positionals, parsed, io) {
   throw usage(`Expected evals resource: suites, cases, or runs`);
 }
 
+async function handleOntologies(client, command, positionals, parsed, io) {
+  const base = "/api/v1/ontologies";
+  if (command === "list" || !command) {
+    return requestAndPrint(client, "GET", base, parsed, io, {
+      table: [
+        { key: "id", label: "ID" },
+        { key: "domain_key", label: "Domain" },
+        { key: "name", label: "Name" },
+        { key: "version_count", label: "Versions" },
+        { key: "latest_version.status", label: "Latest" },
+        { key: "latest_version.validation_status", label: "Validation" },
+      ],
+    });
+  }
+
+  if (command === "create") {
+    const payload = await readData(parsed.flags, io, {
+      domain_key: firstValue(parsed.flags.domainKey),
+      name: firstValue(parsed.flags.name),
+      description: firstValue(parsed.flags.description),
+    });
+    requirePayloadValue(payload, "domain_key", "ontologies create requires --domain-key");
+    requirePayloadValue(payload, "name", "ontologies create requires --name");
+    return requestAndPrint(client, "POST", base, parsed, io, { body: payload });
+  }
+
+  if (command === "get") {
+    const ontologyId = requirePositional(positionals, 0, "ontology id");
+    return requestAndPrint(client, "GET", `${base}/${encodeURIComponent(ontologyId)}`, parsed, io);
+  }
+
+  if (command === "validate") {
+    const sourceText = await readTff(parsed.flags, io);
+    return requestAndPrint(client, "POST", `${base}/validate`, parsed, io, {
+      body: { source_text: sourceText },
+    });
+  }
+
+  if (command === "version" || command === "versions") {
+    const [action, id] = positionals;
+    if (action === "create") {
+      const ontologyId = requirePositional(positionals, 1, "ontology id");
+      const sourceText = await readTff(parsed.flags, io);
+      return requestAndPrint(client, "POST", `${base}/${encodeURIComponent(ontologyId)}/versions`, parsed, io, {
+        body: {
+          source_text: sourceText,
+          predecessor_version_id: firstValue(parsed.flags.predecessor),
+        },
+      });
+    }
+    const versionId = id || requirePositional(positionals, 1, "ontology version id");
+    if (["validate", "review", "freeze"].includes(action)) {
+      return requestAndPrint(client, "POST", `${base}/versions/${encodeURIComponent(versionId)}/${action}`, parsed, io);
+    }
+    if (action === "export") {
+      return requestAndPrint(client, "GET", `${base}/versions/${encodeURIComponent(versionId)}/source`, parsed, io, { rawDefault: true });
+    }
+    throw usage("Expected ontologies version create|validate|review|freeze|export");
+  }
+
+  throw usage(`Unknown ontologies command: ${command}`);
+}
+
 async function handleGeneration(client, command, positionals, parsed, io) {
   const base = "/api/v1/semantic/jobs";
   if (command === "start" || command === "create") {
@@ -1240,6 +1304,18 @@ async function readSql(flags, positionals, io) {
   throw usage("SQL is required. Pass --sql, --file, a positional SQL string, or stdin.");
 }
 
+async function readTff(flags, io) {
+  const inline = firstValue(flags.tff);
+  const file = firstValue(flags.file);
+  if (inline) return inline;
+  if (file) return fs.readFileSync(file, "utf8");
+  if (!io.stdin.isTTY) {
+    const source = await readAll(io.stdin);
+    if (source.trim()) return source;
+  }
+  throw usage("TFF0 source is required. Pass --file, --tff, or stdin.");
+}
+
 async function optionalSql(flags, positionals, io) {
   if (firstValue(flags.sql) || firstValue(flags.file) || positionals.length > 0) {
     return readSql(flags, positionals, io);
@@ -1429,6 +1505,9 @@ function normalizeFlagName(rawName) {
     "--expression": "expression",
     "--source-type": "sourceType",
     "--source": "source",
+    "--domain-key": "domainKey",
+    "--predecessor": "predecessor",
+    "--tff": "tff",
     "--visualization": "visualization",
     "--dashboard": "dashboard",
     "--tile": "tile",
@@ -1683,6 +1762,10 @@ Data products:
     --suite values, plus shared --label, --model, --concurrency <1-8>,
     and --use-semantic-layer or --no-semantic-layer
     update accepts --label <name>
+  answerlayer ontologies list|create|get|validate
+  answerlayer ontologies version create|validate|review|freeze|export
+    create accepts an ontology id, --file <ontology.tff>, and optional
+    --predecessor <version-id>; validate accepts --file or stdin
   answerlayer generation start|list|get|status|stream|cancel|questions|guidance|delete
     start accepts --connection, --component-type, --prompt, --model,
     --eval-suite, and repeatable or comma-separated --eval-case values;
