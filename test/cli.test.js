@@ -1210,6 +1210,128 @@ test("evals cases reveal discloses an oracle through the audited endpoint", asyn
   assert.equal(JSON.parse(output.text()).expected_answer, "Revenue was 1200");
 });
 
+test("ontologies create maps the stable domain identity", async () => {
+  const originalFetch = globalThis.fetch;
+  const output = captureStream();
+
+  globalThis.fetch = async (url, init) => {
+    assert.equal(String(url), "https://answerlayer.example/api/v1/ontologies");
+    assert.equal(init.method, "POST");
+    assert.deepEqual(JSON.parse(init.body), {
+      domain_key: "exoplanet-archive",
+      name: "Exoplanet Archive",
+      description: "Logical vocabulary for archive claims",
+    });
+    return new Response(JSON.stringify({ id: "ontology-1" }), {
+      status: 201,
+      headers: { "content-type": "application/json" },
+    });
+  };
+
+  try {
+    await main([
+      "ontologies", "create",
+      "--base-url", "https://answerlayer.example",
+      "--api-key", "al_live_test",
+      "--domain-key", "exoplanet-archive",
+      "--name", "Exoplanet Archive",
+      "--description", "Logical vocabulary for archive claims",
+    ], {
+      env: {},
+      stdin: readableStdin(),
+      stdout: output,
+      stderr: captureStream(),
+    });
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+
+  assert.deepEqual(JSON.parse(output.text()), { id: "ontology-1" });
+});
+
+test("ontologies version create uploads exact TFF0 source and predecessor", async () => {
+  const originalFetch = globalThis.fetch;
+  const output = captureStream();
+  const sourcePath = path.join(fs.mkdtempSync(path.join(os.tmpdir(), "al-cli-tff-")), "ontology.tff");
+  const source = "% exoplanets\ntff(planet_type, type, planet: $tType).\n";
+  fs.writeFileSync(sourcePath, source);
+
+  globalThis.fetch = async (url, init) => {
+    assert.equal(String(url), "https://answerlayer.example/api/v1/ontologies/ontology-1/versions");
+    assert.equal(init.method, "POST");
+    assert.deepEqual(JSON.parse(init.body), {
+      source_text: source,
+      predecessor_version_id: "version-1",
+    });
+    return new Response(JSON.stringify({ id: "version-2", version_number: 2 }), {
+      status: 201,
+      headers: { "content-type": "application/json" },
+    });
+  };
+
+  try {
+    await main([
+      "ontologies", "version", "create", "ontology-1",
+      "--base-url", "https://answerlayer.example",
+      "--api-key", "al_live_test",
+      "--file", sourcePath,
+      "--predecessor", "version-1",
+    ], {
+      env: {},
+      stdin: readableStdin(),
+      stdout: output,
+      stderr: captureStream(),
+    });
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+
+  assert.equal(JSON.parse(output.text()).version_number, 2);
+});
+
+test("ontologies version freeze and export use lifecycle endpoints", async () => {
+  const originalFetch = globalThis.fetch;
+  const output = captureStream();
+  const exportPath = path.join(fs.mkdtempSync(path.join(os.tmpdir(), "al-cli-tff-")), "ontology.tff");
+  const calls = [];
+
+  globalThis.fetch = async (url, init) => {
+    calls.push({ url: String(url), method: init.method });
+    if (String(url).endsWith("/freeze")) {
+      return new Response(JSON.stringify({ id: "version-2", status: "frozen" }), {
+        status: 200,
+        headers: { "content-type": "application/json" },
+      });
+    }
+    return new Response("tff(planet_type, type, planet: $tType).\n", {
+      status: 200,
+      headers: { "content-type": "text/plain" },
+    });
+  };
+
+  try {
+    const io = { env: {}, stdin: readableStdin(), stdout: output, stderr: captureStream() };
+    const auth = ["--base-url", "https://answerlayer.example", "--api-key", "al_live_test"];
+    await main(["ontologies", "version", "freeze", "version-2", ...auth], io);
+    output.clear();
+    await main(["ontologies", "version", "export", "version-2", ...auth, "--output", exportPath], io);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+
+  assert.deepEqual(calls, [
+    {
+      url: "https://answerlayer.example/api/v1/ontologies/versions/version-2/freeze",
+      method: "POST",
+    },
+    {
+      url: "https://answerlayer.example/api/v1/ontologies/versions/version-2/source",
+      method: "GET",
+    },
+  ]);
+  assert.equal(fs.readFileSync(exportPath, "utf8"), "tff(planet_type, type, planet: $tType).\n");
+});
+
 test("generation start accepts authoring eval context flags", async () => {
   const originalFetch = globalThis.fetch;
   const output = captureStream();
