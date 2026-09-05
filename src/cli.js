@@ -56,6 +56,9 @@ export async function main(argv, io) {
   if (group === "semantic") return handleSemantic(client, command, positionals, parsed, io);
   if (group === "inquiry") return handleInquiry(client, command, positionals, parsed, io);
   if (group === "evals" || group === "evaluations") return handleEvals(client, command, positionals, parsed, io);
+  if (group === "optimize" || group === "optimization" || group === "semantic-optimization") {
+    return handleOptimization(client, command, positionals, parsed, io);
+  }
   if (group === "ontologies" || group === "ontology") return handleOntologies(client, command, positionals, parsed, io);
   if (group === "generation") return handleGeneration(client, command, positionals, parsed, io);
   if (group === "tiles") return handleTiles(client, command, positionals, parsed, io);
@@ -735,6 +738,102 @@ async function handleEvals(client, resource, positionals, parsed, io) {
   }
 
   throw usage(`Expected evals resource: suites, cases, or runs`);
+}
+
+async function handleOptimization(client, command, positionals, parsed, io) {
+  const base = "/api/v1/semantic-optimization/runs";
+  if (command === "list" || !command) {
+    return requestAndPrint(client, "GET", base, parsed, io, {
+      query: { execution_status: firstValue(parsed.flags.status) },
+      table: [
+        { key: "id", label: "ID" },
+        { key: "name", label: "Name" },
+        { key: "execution_status", label: "Status" },
+        { key: "workflow_phase", label: "Phase" },
+        { key: "mode", label: "Mode" },
+        { key: "case_count", label: "Cases" },
+        { key: "current_iteration", label: "Iteration" },
+        { key: "max_iterations", label: "Max" },
+        { key: "best_metric_movement", label: "Best Δ" },
+      ],
+    });
+  }
+
+  if (command === "start" || command === "create") {
+    const sharedModel = firstValue(parsed.flags.model);
+    const selectedCaseIds = optionalCsvOrRepeated(parsed.flags.case);
+    const categories = optionalDistinctRepeated(parsed.flags.category);
+    const tags = optionalDistinctRepeated(parsed.flags.tag);
+    const selected = Boolean(selectedCaseIds?.length || categories?.length || tags?.length);
+    const payload = await readData(parsed.flags, io, {
+      name: firstValue(parsed.flags.name),
+      connection_id: firstValue(parsed.flags.connection),
+      eval_suite_id: firstValue(parsed.flags.suite),
+      cases: {
+        mode: selected ? "selected" : "all_active_authoring",
+        case_ids: selectedCaseIds || [],
+        categories: categories || [],
+        tags: tags || [],
+      },
+      eligible_component_types: optionalCsvOrRepeated(parsed.flags.component) || [
+        "entities", "relationships", "measures", "metrics", "dimensions", "filters",
+      ],
+      proposal_strategy: firstValue(parsed.flags.proposalStrategy) || "coherent_patch",
+      search_strategy: "greedy_constrained_hill_climbing",
+      mode: firstValue(parsed.flags.mode) || "recommendation",
+      review_policy: firstValue(parsed.flags.reviewPolicy),
+      promotion_policy: firstValue(parsed.flags.promotionPolicy) || "manual",
+      models: {
+        eval_execution: firstValue(parsed.flags.evalModel) || sharedModel,
+        analysis: firstValue(parsed.flags.analysisModel) || sharedModel,
+        proposal: firstValue(parsed.flags.proposalModel) || sharedModel,
+        validation: firstValue(parsed.flags.validationModel) || sharedModel,
+        repair: firstValue(parsed.flags.repairModel) || sharedModel,
+      },
+      budget: {
+        max_iterations: numberFlag(parsed.flags.maxIterations, 3),
+        max_proposals: numberFlag(parsed.flags.maxProposals, 10),
+        max_input_tokens: numberFlag(parsed.flags.maxInputTokens, 250000),
+        max_output_tokens: numberFlag(parsed.flags.maxOutputTokens, 50000),
+        max_sql_queries: numberFlag(parsed.flags.maxSqlQueries, 500),
+        max_duration_seconds: numberFlag(parsed.flags.maxDuration, 7200),
+      },
+      objectives: {
+        minimum_score_improvement: numberFlag(parsed.flags.minImprovement, 0.5),
+        maximum_regressions: numberFlag(parsed.flags.maxRegressions, 0),
+        target_pass_rate: numberFlag(parsed.flags.targetPassRate, 100),
+        quality_weight: 1,
+        efficiency_weight: 0.25,
+        simplicity_weight: 0.25,
+      },
+    });
+    requirePayloadValue(payload, "name", "optimize start requires --name");
+    requirePayloadValue(payload, "connection_id", "optimize start requires --connection");
+    requirePayloadValue(payload, "eval_suite_id", "optimize start requires --suite");
+    if (!Object.values(payload.models || {}).every(Boolean)) {
+      throw usage("optimize start requires --model or every phase-specific model flag");
+    }
+    return requestAndPrint(client, "POST", base, parsed, io, { body: payload });
+  }
+
+  const runId = requirePositional(positionals, 0, "semantic optimization run id");
+  if (command === "get" || command === "inspect") {
+    return requestAndPrint(client, "GET", `${base}/${encodeURIComponent(runId)}`, parsed, io);
+  }
+  if (["pause", "resume", "stop", "promote"].includes(command)) {
+    return requestAndPrint(client, "POST", `${base}/${encodeURIComponent(runId)}/${command}`, parsed, io, {
+      body: { reason: firstValue(parsed.flags.reason) },
+    });
+  }
+  if (command === "clone") {
+    return requestAndPrint(client, "POST", `${base}/${encodeURIComponent(runId)}/clone`, parsed, io);
+  }
+  if (command === "approve" || command === "reject") {
+    return requestAndPrint(client, "POST", `${base}/${encodeURIComponent(runId)}/decision`, parsed, io, {
+      body: { decision: command, reason: firstValue(parsed.flags.reason) },
+    });
+  }
+  throw usage(`Unknown optimize command: ${command}`);
 }
 
 async function handleOntologies(client, command, positionals, parsed, io) {
@@ -1525,6 +1624,26 @@ function normalizeFlagName(rawName) {
     "--h": "h",
     "--prompt": "prompt",
     "--model": "model",
+    "--mode": "mode",
+    "--reason": "reason",
+    "--component": "component",
+    "--proposal-strategy": "proposalStrategy",
+    "--review-policy": "reviewPolicy",
+    "--promotion-policy": "promotionPolicy",
+    "--eval-model": "evalModel",
+    "--analysis-model": "analysisModel",
+    "--proposal-model": "proposalModel",
+    "--validation-model": "validationModel",
+    "--repair-model": "repairModel",
+    "--max-iterations": "maxIterations",
+    "--max-proposals": "maxProposals",
+    "--max-input-tokens": "maxInputTokens",
+    "--max-output-tokens": "maxOutputTokens",
+    "--max-sql-queries": "maxSqlQueries",
+    "--max-duration": "maxDuration",
+    "--min-improvement": "minImprovement",
+    "--max-regressions": "maxRegressions",
+    "--target-pass-rate": "targetPassRate",
     "--component-type": "componentType",
     "--use-semantic-layer": "useSemanticLayer",
     "--no-semantic-layer": "noSemanticLayer",
@@ -1643,6 +1762,13 @@ function requirePayloadValue(payload, key, message) {
   if (!payload[key]) throw usage(message);
 }
 
+function numberFlag(value, fallback) {
+  if (value === undefined) return fallback;
+  const parsed = Number(firstValue(value));
+  if (!Number.isFinite(parsed)) throw usage(`Expected a numeric value, received ${firstValue(value)}`);
+  return parsed;
+}
+
 function requireEvalBatchSuites(suiteIds) {
   if (!Array.isArray(suiteIds) || suiteIds.length < 2 || suiteIds.length > 20) {
     throw usage("evals runs create-batch requires 2 to 20 suite ids");
@@ -1751,6 +1877,7 @@ Data products:
   answerlayer evals suites list|create|get|update|delete
   answerlayer evals cases create|update|reveal|delete
   answerlayer evals runs list|create|create-batch|get|update|cancel|compare|analyze
+  answerlayer optimize list|start|get|pause|resume|stop|clone|approve|reject|promote
     case create/update accept --category <name>,
     --partition <authoring|holdout|adversarial>, and
     --oracle-sources '<JSON array>'
@@ -1761,6 +1888,12 @@ Data products:
     create-batch accepts 2 to 20 suite ids as positionals or repeatable
     --suite values, plus shared --label, --model, --concurrency <1-8>,
     and --use-semantic-layer or --no-semantic-layer
+  Optimization:
+    answerlayer optimize start --name NAME --connection ID --suite ID --model MODEL
+    [--mode recommendation|supervised|fully_automatic]
+    [--component entities,relationships,measures,metrics,dimensions,filters]
+    [--review-policy every_sweep|exceptions_only|end_of_run]
+    [--promotion-policy manual|automatic] [--max-iterations N]
     update accepts --label <name>
   answerlayer ontologies list|create|get|validate
     validate accepts --file <ontology.tff>, --tff <source>, or stdin
