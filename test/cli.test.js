@@ -1103,6 +1103,65 @@ test("optimize start freezes explicit policies, budgets, models, and selectors",
   assert.equal(JSON.parse(output.text()).id, "run-1");
 });
 
+test("optimize start defaults analysis model to the explicit proposal model", async () => {
+  const originalFetch = globalThis.fetch;
+
+  globalThis.fetch = async (_url, init) => {
+    const body = JSON.parse(init.body);
+    assert.equal(body.models.eval_execution, "openai.eval-model");
+    assert.equal(body.models.proposal, "openai.proposal-model");
+    assert.equal(body.models.analysis, "openai.proposal-model");
+    return new Response(JSON.stringify({ id: "run-1" }), {
+      status: 201,
+      headers: { "content-type": "application/json" },
+    });
+  };
+
+  try {
+    await main([
+      "optimize", "start",
+      "--base-url", "https://answerlayer.example",
+      "--api-key", "al_live_test",
+      "--name", "Optimizer",
+      "--connection", "connection-1",
+      "--suite", "suite-1",
+      "--eval-model", "openai.eval-model",
+      "--proposal-model", "openai.proposal-model",
+    ], { env: {}, stdin: readableStdin(), stdout: captureStream(), stderr: captureStream() });
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test("optimize start defaults analysis model to the shared model", async () => {
+  const originalFetch = globalThis.fetch;
+
+  globalThis.fetch = async (_url, init) => {
+    const body = JSON.parse(init.body);
+    assert.equal(body.models.eval_execution, "openai.shared-model");
+    assert.equal(body.models.proposal, "openai.shared-model");
+    assert.equal(body.models.analysis, "openai.shared-model");
+    return new Response(JSON.stringify({ id: "run-1" }), {
+      status: 201,
+      headers: { "content-type": "application/json" },
+    });
+  };
+
+  try {
+    await main([
+      "optimize", "start",
+      "--base-url", "https://answerlayer.example",
+      "--api-key", "al_live_test",
+      "--name", "Optimizer",
+      "--connection", "connection-1",
+      "--suite", "suite-1",
+      "--model", "openai.shared-model",
+    ], { env: {}, stdin: readableStdin(), stdout: captureStream(), stderr: captureStream() });
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
 test("optimize approve uses the explicit review endpoint", async () => {
   const originalFetch = globalThis.fetch;
   globalThis.fetch = async (url, init) => {

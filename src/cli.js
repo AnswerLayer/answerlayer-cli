@@ -1904,6 +1904,7 @@ Data products:
     and --use-semantic-layer or --no-semantic-layer
   Optimization:
     answerlayer optimize start --name NAME --connection ID --suite ID --model MODEL
+    [--eval-model MODEL] [--proposal-model MODEL] [--analysis-model MODEL]
     [--mode recommendation|supervised|fully_automatic]
     [--component entities,relationships,measures,metrics,dimensions,filters]
     [--review-policy every_sweep|exceptions_only|end_of_run]
