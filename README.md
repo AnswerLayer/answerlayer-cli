@@ -235,6 +235,29 @@ Useful scopes:
 
 ## Commands
 
+### Semantic optimization
+
+Launch a durable, eval-driven optimization run without changing the active
+semantic layer:
+
+```bash
+answerlayer optimize start \
+  --name "Exoplanet semantic optimization" \
+  --connection CONNECTION_ID \
+  --suite SUITE_ID \
+  --model openai.gpt-5.6-terra \
+  --mode recommendation
+```
+
+Inspect and operate the registry with `answerlayer optimize list`,
+`get RUN_ID`, `pause RUN_ID`, `resume RUN_ID`, `stop RUN_ID`, `clone RUN_ID`,
+`approve RUN_ID`, and `reject RUN_ID`. Promotion is a separate, explicit atomic
+compare-and-swap using the frozen hash shown by `get RUN_ID`:
+
+```bash
+answerlayer optimize promote RUN_ID --base-hash FROZEN_BASE_SHA256
+```
+
 ```bash
 answerlayer health
 answerlayer openapi --output openapi.json

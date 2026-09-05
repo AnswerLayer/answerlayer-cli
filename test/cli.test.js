@@ -1048,6 +1048,116 @@ test("evals suites create maps common flags to the evaluation API", async () => 
   assert.deepEqual(JSON.parse(output.text()), { id: "suite-1" });
 });
 
+test("optimize start freezes explicit policies, budgets, models, and selectors", async () => {
+  const originalFetch = globalThis.fetch;
+  const output = captureStream();
+
+  globalThis.fetch = async (url, init) => {
+    assert.equal(String(url), "https://answerlayer.example/api/v1/semantic-optimization/runs");
+    assert.equal(init.method, "POST");
+    const body = JSON.parse(init.body);
+    assert.equal(body.name, "Exoplanet optimizer");
+    assert.equal(body.connection_id, "connection-1");
+    assert.equal(body.eval_suite_id, "suite-1");
+    assert.deepEqual(body.cases, {
+      mode: "selected",
+      case_ids: [],
+      categories: ["habitability"],
+      tags: ["exoearth"],
+    });
+    assert.deepEqual(body.eligible_component_types, ["entities", "metrics"]);
+    assert.equal(body.mode, "fully_automatic");
+    assert.equal(body.review_policy, "end_of_run");
+    assert.equal(body.promotion_policy, "manual");
+    assert.equal(body.models.proposal, "openai.gpt-5.6-terra");
+    assert.equal(body.budget.max_iterations, 4);
+    return new Response(JSON.stringify({ id: "run-1", execution_status: "queued" }), {
+      status: 201,
+      headers: { "content-type": "application/json" },
+    });
+  };
+
+  try {
+    await main([
+      "optimize", "start",
+      "--base-url", "https://answerlayer.example",
+      "--api-key", "al_live_test",
+      "--name", "Exoplanet optimizer",
+      "--connection", "connection-1",
+      "--suite", "suite-1",
+      "--model", "openai.gpt-5.6-terra",
+      "--mode", "fully_automatic",
+      "--review-policy", "end_of_run",
+      "--promotion-policy", "manual",
+      "--component", "entities,metrics",
+      "--category", "habitability",
+      "--tag", "exoearth",
+      "--max-iterations", "4",
+    ], { env: {}, stdin: readableStdin(), stdout: output, stderr: captureStream() });
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+
+  assert.equal(JSON.parse(output.text()).id, "run-1");
+});
+
+test("optimize approve uses the explicit review endpoint", async () => {
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async (url, init) => {
+    assert.equal(String(url), "https://answerlayer.example/api/v1/semantic-optimization/runs/run-1/decision");
+    assert.equal(init.method, "POST");
+    assert.deepEqual(JSON.parse(init.body), { decision: "approve", reason: "Looks good" });
+    return new Response(JSON.stringify({ id: "run-1" }), { status: 200, headers: { "content-type": "application/json" } });
+  };
+  try {
+    await main([
+      "optimize", "approve", "run-1", "--reason", "Looks good",
+      "--base-url", "https://answerlayer.example", "--api-key", "al_live_test", "--json",
+    ], { env: {}, stdin: readableStdin(), stdout: captureStream(), stderr: captureStream() });
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test("optimize promote sends the caller-observed base hash", async () => {
+  const originalFetch = globalThis.fetch;
+  const baseHash = "a".repeat(64);
+  globalThis.fetch = async (url, init) => {
+    assert.equal(String(url), "https://answerlayer.example/api/v1/semantic-optimization/runs/run-1/promote");
+    assert.equal(init.method, "POST");
+    assert.deepEqual(JSON.parse(init.body), {
+      reason: "Ship it",
+      expected_active_sha256: baseHash,
+    });
+    return new Response(JSON.stringify({ id: "run-1" }), { status: 200, headers: { "content-type": "application/json" } });
+  };
+  try {
+    await main([
+      "optimize", "promote", "run-1", "--base-hash", baseHash, "--reason", "Ship it",
+      "--base-url", "https://answerlayer.example", "--api-key", "al_live_test", "--json",
+    ], { env: {}, stdin: readableStdin(), stdout: captureStream(), stderr: captureStream() });
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test("optimize start rejects an empty structured models object", async () => {
+  await assert.rejects(
+    main([
+      "optimize", "start",
+      "--base-url", "https://answerlayer.example",
+      "--api-key", "al_live_test",
+      "--data", JSON.stringify({
+        name: "Optimizer",
+        connection_id: "connection-1",
+        eval_suite_id: "suite-1",
+        models: {},
+      }),
+    ], { env: {}, stdin: readableStdin(), stdout: captureStream(), stderr: captureStream() }),
+    /requires --model or both --eval-model and --proposal-model/,
+  );
+});
+
 test("evals cases create accepts evaluator flags and repeated constraints", async () => {
   const originalFetch = globalThis.fetch;
   const output = captureStream();
