@@ -785,10 +785,10 @@ async function handleOptimization(client, command, positionals, parsed, io) {
       promotion_policy: firstValue(parsed.flags.promotionPolicy) || "manual",
       models: {
         eval_execution: firstValue(parsed.flags.evalModel) || sharedModel,
-        analysis: firstValue(parsed.flags.analysisModel) || sharedModel,
         proposal: firstValue(parsed.flags.proposalModel) || sharedModel,
-        validation: firstValue(parsed.flags.validationModel) || sharedModel,
-        repair: firstValue(parsed.flags.repairModel) || sharedModel,
+        analysis: "deterministic",
+        validation: "deterministic",
+        repair: "disabled",
       },
       budget: {
         max_iterations: numberFlag(parsed.flags.maxIterations, 3),
@@ -810,8 +810,9 @@ async function handleOptimization(client, command, positionals, parsed, io) {
     requirePayloadValue(payload, "name", "optimize start requires --name");
     requirePayloadValue(payload, "connection_id", "optimize start requires --connection");
     requirePayloadValue(payload, "eval_suite_id", "optimize start requires --suite");
-    if (!Object.values(payload.models || {}).every(Boolean)) {
-      throw usage("optimize start requires --model or every phase-specific model flag");
+    const requiredModels = ["eval_execution", "proposal"];
+    if (requiredModels.some((key) => typeof payload.models?.[key] !== "string" || !payload.models[key].trim())) {
+      throw usage("optimize start requires --model or both --eval-model and --proposal-model");
     }
     return requestAndPrint(client, "POST", base, parsed, io, { body: payload });
   }
@@ -820,9 +821,21 @@ async function handleOptimization(client, command, positionals, parsed, io) {
   if (command === "get" || command === "inspect") {
     return requestAndPrint(client, "GET", `${base}/${encodeURIComponent(runId)}`, parsed, io);
   }
-  if (["pause", "resume", "stop", "promote"].includes(command)) {
+  if (["pause", "resume", "stop"].includes(command)) {
     return requestAndPrint(client, "POST", `${base}/${encodeURIComponent(runId)}/${command}`, parsed, io, {
       body: { reason: firstValue(parsed.flags.reason) },
+    });
+  }
+  if (command === "promote") {
+    const expectedActiveSha256 = firstValue(parsed.flags.baseHash);
+    if (!expectedActiveSha256) {
+      throw usage("optimize promote requires --base-hash from the run's frozen manifest");
+    }
+    return requestAndPrint(client, "POST", `${base}/${encodeURIComponent(runId)}/promote`, parsed, io, {
+      body: {
+        reason: firstValue(parsed.flags.reason),
+        expected_active_sha256: expectedActiveSha256,
+      },
     });
   }
   if (command === "clone") {
@@ -1631,10 +1644,8 @@ function normalizeFlagName(rawName) {
     "--review-policy": "reviewPolicy",
     "--promotion-policy": "promotionPolicy",
     "--eval-model": "evalModel",
-    "--analysis-model": "analysisModel",
     "--proposal-model": "proposalModel",
-    "--validation-model": "validationModel",
-    "--repair-model": "repairModel",
+    "--base-hash": "baseHash",
     "--max-iterations": "maxIterations",
     "--max-proposals": "maxProposals",
     "--max-input-tokens": "maxInputTokens",
@@ -1894,6 +1905,7 @@ Data products:
     [--component entities,relationships,measures,metrics,dimensions,filters]
     [--review-policy every_sweep|exceptions_only|end_of_run]
     [--promotion-policy manual|automatic] [--max-iterations N]
+    answerlayer optimize promote RUN_ID --base-hash SHA256
     update accepts --label <name>
   answerlayer ontologies list|create|get|validate
     validate accepts --file <ontology.tff>, --tff <source>, or stdin

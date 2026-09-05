@@ -251,8 +251,12 @@ answerlayer optimize start \
 
 Inspect and operate the registry with `answerlayer optimize list`,
 `get RUN_ID`, `pause RUN_ID`, `resume RUN_ID`, `stop RUN_ID`, `clone RUN_ID`,
-`approve RUN_ID`, and `reject RUN_ID`. `promote RUN_ID` is a separate explicit
-action and uses an optimistic base-hash check.
+`approve RUN_ID`, and `reject RUN_ID`. Promotion is a separate, explicit atomic
+compare-and-swap using the frozen hash shown by `get RUN_ID`:
+
+```bash
+answerlayer optimize promote RUN_ID --base-hash FROZEN_BASE_SHA256
+```
 
 ```bash
 answerlayer health
