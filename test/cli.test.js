@@ -1069,6 +1069,7 @@ test("optimize start freezes explicit policies, budgets, models, and selectors",
     assert.equal(body.mode, "fully_automatic");
     assert.equal(body.review_policy, "end_of_run");
     assert.equal(body.promotion_policy, "manual");
+    assert.equal(body.models.analysis, "openai.gpt-5.6-luna");
     assert.equal(body.models.proposal, "openai.gpt-5.6-terra");
     assert.equal(body.budget.max_iterations, 4);
     return new Response(JSON.stringify({ id: "run-1", execution_status: "queued" }), {
@@ -1086,6 +1087,7 @@ test("optimize start freezes explicit policies, budgets, models, and selectors",
       "--connection", "connection-1",
       "--suite", "suite-1",
       "--model", "openai.gpt-5.6-terra",
+      "--analysis-model", "openai.gpt-5.6-luna",
       "--mode", "fully_automatic",
       "--review-policy", "end_of_run",
       "--promotion-policy", "manual",

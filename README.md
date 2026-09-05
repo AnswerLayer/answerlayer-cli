@@ -249,6 +249,9 @@ answerlayer optimize start \
   --mode recommendation
 ```
 
+By default the proposal model also reviews bounded failed-case traces during
+failure analysis. Use `--analysis-model MODEL` to select a dedicated reviewer.
+
 Inspect and operate the registry with `answerlayer optimize list`,
 `get RUN_ID`, `pause RUN_ID`, `resume RUN_ID`, `stop RUN_ID`, `clone RUN_ID`,
 `approve RUN_ID`, and `reject RUN_ID`. Promotion is a separate, explicit atomic

@@ -786,7 +786,9 @@ async function handleOptimization(client, command, positionals, parsed, io) {
       models: {
         eval_execution: firstValue(parsed.flags.evalModel) || sharedModel,
         proposal: firstValue(parsed.flags.proposalModel) || sharedModel,
-        analysis: "deterministic",
+        analysis: firstValue(parsed.flags.analysisModel)
+          || firstValue(parsed.flags.proposalModel)
+          || sharedModel,
         validation: "deterministic",
         repair: "disabled",
       },
@@ -1644,6 +1646,7 @@ function normalizeFlagName(rawName) {
     "--review-policy": "reviewPolicy",
     "--promotion-policy": "promotionPolicy",
     "--eval-model": "evalModel",
+    "--analysis-model": "analysisModel",
     "--proposal-model": "proposalModel",
     "--base-hash": "baseHash",
     "--max-iterations": "maxIterations",
