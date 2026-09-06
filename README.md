@@ -251,8 +251,10 @@ answerlayer optimize start \
 
 The shared `--model` defaults the eval agent, judge, trace analyzer, and
 component author. Use `--eval-model`, `--judge-model`, `--analysis-model`, or
-`--proposal-model` for explicit role overrides. Without a shared model or
-`--judge-model`, each case keeps its configured judge.
+`--proposal-model` for explicit role overrides. If `--analysis-model` is
+omitted, trace analysis uses the explicit `--proposal-model` before falling
+back to the shared model. Without a shared model or `--judge-model`, each case
+keeps its configured judge.
 
 Inspect and operate the registry with `answerlayer optimize list`,
 `get RUN_ID`, `pause RUN_ID`, `resume RUN_ID`, `stop RUN_ID`, `clone RUN_ID`,
