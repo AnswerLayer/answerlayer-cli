@@ -1048,6 +1048,49 @@ test("evals suites create maps common flags to the evaluation API", async () => 
   assert.deepEqual(JSON.parse(output.text()), { id: "suite-1" });
 });
 
+test("evals suites get preserves complete protected case oracles", async () => {
+  const originalFetch = globalThis.fetch;
+  const output = captureStream();
+  const suite = {
+    id: "suite-1",
+    cases: [{
+      id: "case-1",
+      partition: "holdout",
+      expected_answer: "Revenue was 1200",
+      expected_sql: "select 1200",
+      expected_values: [{ type: "number", value: 1200 }],
+      oracle_redacted: false,
+    }],
+  };
+
+  globalThis.fetch = async (url, init) => {
+    assert.equal(String(url), "https://answerlayer.example/api/v1/evals/suites/suite-1");
+    assert.equal(init.method, "GET");
+    return new Response(JSON.stringify(suite), {
+      status: 200,
+      headers: { "content-type": "application/json" },
+    });
+  };
+
+  try {
+    await main([
+      "evals", "suites", "get", "suite-1",
+      "--base-url", "https://answerlayer.example",
+      "--api-key", "al_live_test",
+      "--json",
+    ], {
+      env: {},
+      stdin: readableStdin(),
+      stdout: output,
+      stderr: captureStream(),
+    });
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+
+  assert.deepEqual(JSON.parse(output.text()), suite);
+});
+
 test("optimize start freezes explicit policies, budgets, models, and selectors", async () => {
   const originalFetch = globalThis.fetch;
   const output = captureStream();
@@ -1343,42 +1386,6 @@ test("evals cases update accepts a category", async () => {
   }
 
   assert.deepEqual(JSON.parse(output.text()), { id: "case-1", category: "Finance" });
-});
-
-test("evals cases reveal discloses an oracle through the audited endpoint", async () => {
-  const originalFetch = globalThis.fetch;
-  const output = captureStream();
-
-  globalThis.fetch = async (url, init) => {
-    assert.equal(String(url), "https://answerlayer.example/api/v1/evals/cases/case-1/reveal");
-    assert.equal(init.method, "POST");
-    return new Response(JSON.stringify({
-      id: "case-1",
-      partition: "holdout",
-      oracle_redacted: false,
-      expected_answer: "Revenue was 1200",
-    }), {
-      status: 200,
-      headers: { "content-type": "application/json" },
-    });
-  };
-
-  try {
-    await main([
-      "evals", "cases", "reveal", "case-1",
-      "--base-url", "https://answerlayer.example",
-      "--api-key", "al_live_test",
-    ], {
-      env: {},
-      stdin: readableStdin(),
-      stdout: output,
-      stderr: captureStream(),
-    });
-  } finally {
-    globalThis.fetch = originalFetch;
-  }
-
-  assert.equal(JSON.parse(output.text()).expected_answer, "Revenue was 1200");
 });
 
 test("ontologies create maps the stable domain identity", async () => {

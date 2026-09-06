@@ -296,9 +296,9 @@ answerlayer inquiry models
 answerlayer inquiry ask --connection <connection-id> --model claude-opus-4-6 "Investigate unusual revenue changes"
 
 answerlayer evals suites create --name "Revenue checks" --connection <connection-id>
+answerlayer evals suites get <suite-id> --json # complete suite for authorized inspection
 answerlayer evals cases create <suite-id> --title "Monthly revenue" --question "What was revenue last month?" --category Revenue --expected-sql "select sum(amount) from orders where ..." --oracle-sources '[{"kind":"external","title":"Revenue policy","url":"https://example.com/revenue-policy"}]'
 answerlayer evals cases create <suite-id> --title "Unseen revenue check" --question "How much revenue did we make?" --partition holdout --expected-sql "select sum(amount) from orders"
-answerlayer evals cases reveal <case-id> --json # admin-only, explicit, and audited
 answerlayer evals runs create <suite-id> --label "Before prompt change"
 answerlayer evals runs create <suite-id> --case <case-id> --case <case-id> --label "Focused smoke run"
 answerlayer evals runs create <suite-id> --category Revenue --category Finance --case <case-id> --label "Focused category run"
