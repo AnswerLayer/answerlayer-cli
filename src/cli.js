@@ -785,6 +785,7 @@ async function handleOptimization(client, command, positionals, parsed, io) {
       promotion_policy: firstValue(parsed.flags.promotionPolicy) || "manual",
       models: {
         eval_execution: firstValue(parsed.flags.evalModel) || sharedModel,
+        judge: firstValue(parsed.flags.judgeModel) || sharedModel,
         proposal: firstValue(parsed.flags.proposalModel) || sharedModel,
         analysis: firstValue(parsed.flags.analysisModel)
           || firstValue(parsed.flags.proposalModel)
@@ -1646,6 +1647,7 @@ function normalizeFlagName(rawName) {
     "--review-policy": "reviewPolicy",
     "--promotion-policy": "promotionPolicy",
     "--eval-model": "evalModel",
+    "--judge-model": "judgeModel",
     "--analysis-model": "analysisModel",
     "--proposal-model": "proposalModel",
     "--base-hash": "baseHash",
@@ -1904,7 +1906,8 @@ Data products:
     and --use-semantic-layer or --no-semantic-layer
   Optimization:
     answerlayer optimize start --name NAME --connection ID --suite ID --model MODEL
-    [--eval-model MODEL] [--proposal-model MODEL] [--analysis-model MODEL]
+    [--eval-model MODEL] [--judge-model MODEL] [--analysis-model MODEL]
+    [--proposal-model MODEL]
     [--mode recommendation|supervised|fully_automatic]
     [--component entities,relationships,measures,metrics,dimensions,filters]
     [--review-policy every_sweep|exceptions_only|end_of_run]

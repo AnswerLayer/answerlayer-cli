@@ -1071,6 +1071,7 @@ test("optimize start freezes explicit policies, budgets, models, and selectors",
     assert.equal(body.promotion_policy, "manual");
     assert.equal(body.models.analysis, "openai.gpt-5.6-luna");
     assert.equal(body.models.proposal, "openai.gpt-5.6-terra");
+    assert.equal(body.models.judge, "openai.judge-model");
     assert.equal(body.budget.max_iterations, 4);
     return new Response(JSON.stringify({ id: "run-1", execution_status: "queued" }), {
       status: 201,
@@ -1087,6 +1088,7 @@ test("optimize start freezes explicit policies, budgets, models, and selectors",
       "--connection", "connection-1",
       "--suite", "suite-1",
       "--model", "openai.gpt-5.6-terra",
+      "--judge-model", "openai.judge-model",
       "--analysis-model", "openai.gpt-5.6-luna",
       "--mode", "fully_automatic",
       "--review-policy", "end_of_run",
@@ -1111,6 +1113,7 @@ test("optimize start defaults analysis model to the explicit proposal model", as
     assert.equal(body.models.eval_execution, "openai.eval-model");
     assert.equal(body.models.proposal, "openai.proposal-model");
     assert.equal(body.models.analysis, "openai.proposal-model");
+    assert.equal(body.models.judge, undefined);
     return new Response(JSON.stringify({ id: "run-1" }), {
       status: 201,
       headers: { "content-type": "application/json" },
@@ -1141,6 +1144,7 @@ test("optimize start defaults analysis model to the shared model", async () => {
     assert.equal(body.models.eval_execution, "openai.shared-model");
     assert.equal(body.models.proposal, "openai.shared-model");
     assert.equal(body.models.analysis, "openai.shared-model");
+    assert.equal(body.models.judge, "openai.shared-model");
     return new Response(JSON.stringify({ id: "run-1" }), {
       status: 201,
       headers: { "content-type": "application/json" },
