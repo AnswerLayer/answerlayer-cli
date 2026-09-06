@@ -249,8 +249,10 @@ answerlayer optimize start \
   --mode recommendation
 ```
 
-By default the proposal model also reviews bounded failed-case traces during
-failure analysis. Use `--analysis-model MODEL` to select a dedicated reviewer.
+The shared `--model` defaults the eval agent, judge, trace analyzer, and
+component author. Use `--eval-model`, `--judge-model`, `--analysis-model`, or
+`--proposal-model` for explicit role overrides. Without a shared model or
+`--judge-model`, each case keeps its configured judge.
 
 Inspect and operate the registry with `answerlayer optimize list`,
 `get RUN_ID`, `pause RUN_ID`, `resume RUN_ID`, `stop RUN_ID`, `clone RUN_ID`,
