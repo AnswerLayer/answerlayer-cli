@@ -249,8 +249,10 @@ answerlayer optimize start \
   --mode recommendation
 ```
 
-By default the proposal model also reviews bounded failed-case traces during
-failure analysis. Use `--analysis-model MODEL` to select a dedicated reviewer.
+The proposal model runs one bounded optimization session that reviews failed-case
+traces, edits a detached candidate, validates it, and repairs diagnostics before
+submission. Tune its bounds with `--max-agent-turns`,
+`--max-validation-attempts`, and `--max-targeted-evals`.
 
 Inspect and operate the registry with `answerlayer optimize list`,
 `get RUN_ID`, `pause RUN_ID`, `resume RUN_ID`, `stop RUN_ID`, `clone RUN_ID`,
