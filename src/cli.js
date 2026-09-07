@@ -652,7 +652,6 @@ async function handleEvals(client, resource, positionals, parsed, io) {
         body: await readData(parsed.flags, io, { ...evalCasePayload(parsed.flags), is_active: activeFlag(parsed.flags) }),
       });
     }
-    if (command === "reveal") return requestAndPrint(client, "POST", `${base}/cases/${encodeURIComponent(caseId)}/reveal`, parsed, io);
     if (command === "delete") return requestAndPrint(client, "DELETE", `${base}/cases/${encodeURIComponent(caseId)}`, parsed, io);
     throw usage(`Unknown evals cases command: ${command}`);
   }
@@ -1889,7 +1888,7 @@ Data products:
   answerlayer semantic <entities|relationships|measures|metrics|dimensions|filters> list|get|create|update|delete|delete-all|generate
   answerlayer inquiry models|ask|sessions|create-session|session|update-session|delete-session|turn
   answerlayer evals suites list|create|get|update|delete
-  answerlayer evals cases create|update|reveal|delete
+  answerlayer evals cases create|update|delete
   answerlayer evals runs list|create|create-batch|get|update|cancel|compare|analyze
   answerlayer optimize list|start|get|pause|resume|stop|clone|approve|reject|promote
     case create/update accept --category <name>,
