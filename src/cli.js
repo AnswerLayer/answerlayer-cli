@@ -759,6 +759,9 @@ async function handleOptimization(client, command, positionals, parsed, io) {
   }
 
   if (command === "start" || command === "create") {
+    if (parsed.flags.analysisModel !== undefined) {
+      throw usage("--analysis-model was removed; use --proposal-model for the coherent optimization agent");
+    }
     const sharedModel = firstValue(parsed.flags.model);
     const selectedCaseIds = optionalCsvOrRepeated(parsed.flags.case);
     const categories = optionalDistinctRepeated(parsed.flags.category);
@@ -794,9 +797,15 @@ async function handleOptimization(client, command, positionals, parsed, io) {
         max_output_tokens: numberFlag(parsed.flags.maxOutputTokens, 50000),
         max_sql_queries: numberFlag(parsed.flags.maxSqlQueries, 500),
         max_duration_seconds: numberFlag(parsed.flags.maxDuration, 7200),
-        max_agent_turns: numberFlag(parsed.flags.maxAgentTurns, 50),
-        max_validation_attempts: numberFlag(parsed.flags.maxValidationAttempts, 10),
-        max_targeted_evals: numberFlag(parsed.flags.maxTargetedEvals, 3),
+        max_agent_turns: parseBoundedInteger(
+          firstValue(parsed.flags.maxAgentTurns), "max-agent-turns", 1, 200,
+        ) ?? 50,
+        max_validation_attempts: parseBoundedInteger(
+          firstValue(parsed.flags.maxValidationAttempts), "max-validation-attempts", 1, 100,
+        ) ?? 10,
+        max_targeted_evals: parseBoundedInteger(
+          firstValue(parsed.flags.maxTargetedEvals), "max-targeted-evals", 0, 25,
+        ) ?? 3,
       },
       objectives: {
         minimum_score_improvement: numberFlag(parsed.flags.minImprovement, 0.5),

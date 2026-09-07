@@ -1211,6 +1211,43 @@ test("optimize start uses the shared model for eval and the coherent agent", asy
   }
 });
 
+test("optimize start rejects obsolete analysis-model usage", async () => {
+  await assert.rejects(
+    main([
+      "optimize", "start",
+      "--name", "Optimizer",
+      "--connection", "connection-1",
+      "--suite", "suite-1",
+      "--model", "openai.shared-model",
+      "--analysis-model", "openai.old-analysis-model",
+    ], { env: {}, stdin: readableStdin(), stdout: captureStream(), stderr: captureStream() }),
+    /--analysis-model was removed; use --proposal-model/,
+  );
+});
+
+test("optimize start rejects fractional and out-of-range agent budgets", async () => {
+  const base = [
+    "optimize", "start",
+    "--name", "Optimizer",
+    "--connection", "connection-1",
+    "--suite", "suite-1",
+    "--model", "openai.shared-model",
+  ];
+
+  await assert.rejects(
+    main([...base, "--max-agent-turns", "1.5"], {
+      env: {}, stdin: readableStdin(), stdout: captureStream(), stderr: captureStream(),
+    }),
+    /--max-agent-turns to be an integer from 1 to 200/,
+  );
+  await assert.rejects(
+    main([...base, "--max-targeted-evals=-1"], {
+      env: {}, stdin: readableStdin(), stdout: captureStream(), stderr: captureStream(),
+    }),
+    /--max-targeted-evals to be an integer from 0 to 25/,
+  );
+});
+
 test("optimize approve uses the explicit review endpoint", async () => {
   const originalFetch = globalThis.fetch;
   globalThis.fetch = async (url, init) => {
