@@ -1112,9 +1112,13 @@ test("optimize start freezes explicit policies, budgets, models, and selectors",
     assert.equal(body.mode, "fully_automatic");
     assert.equal(body.review_policy, "end_of_run");
     assert.equal(body.promotion_policy, "manual");
-    assert.equal(body.models.analysis, "openai.gpt-5.6-luna");
     assert.equal(body.models.proposal, "openai.gpt-5.6-terra");
+    assert.equal(body.models.analysis, undefined);
+    assert.equal(body.models.repair, undefined);
     assert.equal(body.budget.max_iterations, 4);
+    assert.equal(body.budget.max_agent_turns, 25);
+    assert.equal(body.budget.max_validation_attempts, 6);
+    assert.equal(body.budget.max_targeted_evals, 2);
     return new Response(JSON.stringify({ id: "run-1", execution_status: "queued" }), {
       status: 201,
       headers: { "content-type": "application/json" },
@@ -1130,7 +1134,6 @@ test("optimize start freezes explicit policies, budgets, models, and selectors",
       "--connection", "connection-1",
       "--suite", "suite-1",
       "--model", "openai.gpt-5.6-terra",
-      "--analysis-model", "openai.gpt-5.6-luna",
       "--mode", "fully_automatic",
       "--review-policy", "end_of_run",
       "--promotion-policy", "manual",
@@ -1138,6 +1141,9 @@ test("optimize start freezes explicit policies, budgets, models, and selectors",
       "--category", "habitability",
       "--tag", "exoearth",
       "--max-iterations", "4",
+      "--max-agent-turns", "25",
+      "--max-validation-attempts", "6",
+      "--max-targeted-evals", "2",
     ], { env: {}, stdin: readableStdin(), stdout: output, stderr: captureStream() });
   } finally {
     globalThis.fetch = originalFetch;
@@ -1146,14 +1152,14 @@ test("optimize start freezes explicit policies, budgets, models, and selectors",
   assert.equal(JSON.parse(output.text()).id, "run-1");
 });
 
-test("optimize start defaults analysis model to the explicit proposal model", async () => {
+test("optimize start uses the explicit proposal model for the coherent agent", async () => {
   const originalFetch = globalThis.fetch;
 
   globalThis.fetch = async (_url, init) => {
     const body = JSON.parse(init.body);
     assert.equal(body.models.eval_execution, "openai.eval-model");
     assert.equal(body.models.proposal, "openai.proposal-model");
-    assert.equal(body.models.analysis, "openai.proposal-model");
+    assert.equal(body.models.analysis, undefined);
     return new Response(JSON.stringify({ id: "run-1" }), {
       status: 201,
       headers: { "content-type": "application/json" },
@@ -1176,14 +1182,14 @@ test("optimize start defaults analysis model to the explicit proposal model", as
   }
 });
 
-test("optimize start defaults analysis model to the shared model", async () => {
+test("optimize start uses the shared model for eval and the coherent agent", async () => {
   const originalFetch = globalThis.fetch;
 
   globalThis.fetch = async (_url, init) => {
     const body = JSON.parse(init.body);
     assert.equal(body.models.eval_execution, "openai.shared-model");
     assert.equal(body.models.proposal, "openai.shared-model");
-    assert.equal(body.models.analysis, "openai.shared-model");
+    assert.equal(body.models.analysis, undefined);
     return new Response(JSON.stringify({ id: "run-1" }), {
       status: 201,
       headers: { "content-type": "application/json" },
@@ -1203,6 +1209,43 @@ test("optimize start defaults analysis model to the shared model", async () => {
   } finally {
     globalThis.fetch = originalFetch;
   }
+});
+
+test("optimize start rejects obsolete analysis-model usage", async () => {
+  await assert.rejects(
+    main([
+      "optimize", "start",
+      "--name", "Optimizer",
+      "--connection", "connection-1",
+      "--suite", "suite-1",
+      "--model", "openai.shared-model",
+      "--analysis-model", "openai.old-analysis-model",
+    ], { env: {}, stdin: readableStdin(), stdout: captureStream(), stderr: captureStream() }),
+    /--analysis-model was removed; use --proposal-model/,
+  );
+});
+
+test("optimize start rejects fractional and out-of-range agent budgets", async () => {
+  const base = [
+    "optimize", "start",
+    "--name", "Optimizer",
+    "--connection", "connection-1",
+    "--suite", "suite-1",
+    "--model", "openai.shared-model",
+  ];
+
+  await assert.rejects(
+    main([...base, "--max-agent-turns", "1.5"], {
+      env: {}, stdin: readableStdin(), stdout: captureStream(), stderr: captureStream(),
+    }),
+    /--max-agent-turns to be an integer from 1 to 200/,
+  );
+  await assert.rejects(
+    main([...base, "--max-targeted-evals=-1"], {
+      env: {}, stdin: readableStdin(), stdout: captureStream(), stderr: captureStream(),
+    }),
+    /--max-targeted-evals to be an integer from 0 to 25/,
+  );
 });
 
 test("optimize approve uses the explicit review endpoint", async () => {

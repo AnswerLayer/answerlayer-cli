@@ -759,6 +759,9 @@ async function handleOptimization(client, command, positionals, parsed, io) {
   }
 
   if (command === "start" || command === "create") {
+    if (parsed.flags.analysisModel !== undefined) {
+      throw usage("--analysis-model was removed; use --proposal-model for the coherent optimization agent");
+    }
     const sharedModel = firstValue(parsed.flags.model);
     const selectedCaseIds = optionalCsvOrRepeated(parsed.flags.case);
     const categories = optionalDistinctRepeated(parsed.flags.category);
@@ -785,11 +788,7 @@ async function handleOptimization(client, command, positionals, parsed, io) {
       models: {
         eval_execution: firstValue(parsed.flags.evalModel) || sharedModel,
         proposal: firstValue(parsed.flags.proposalModel) || sharedModel,
-        analysis: firstValue(parsed.flags.analysisModel)
-          || firstValue(parsed.flags.proposalModel)
-          || sharedModel,
         validation: "deterministic",
-        repair: "disabled",
       },
       budget: {
         max_iterations: numberFlag(parsed.flags.maxIterations, 3),
@@ -798,6 +797,15 @@ async function handleOptimization(client, command, positionals, parsed, io) {
         max_output_tokens: numberFlag(parsed.flags.maxOutputTokens, 50000),
         max_sql_queries: numberFlag(parsed.flags.maxSqlQueries, 500),
         max_duration_seconds: numberFlag(parsed.flags.maxDuration, 7200),
+        max_agent_turns: parseBoundedInteger(
+          firstValue(parsed.flags.maxAgentTurns), "max-agent-turns", 1, 200,
+        ) ?? 50,
+        max_validation_attempts: parseBoundedInteger(
+          firstValue(parsed.flags.maxValidationAttempts), "max-validation-attempts", 1, 100,
+        ) ?? 10,
+        max_targeted_evals: parseBoundedInteger(
+          firstValue(parsed.flags.maxTargetedEvals), "max-targeted-evals", 0, 25,
+        ) ?? 3,
       },
       objectives: {
         minimum_score_improvement: numberFlag(parsed.flags.minImprovement, 0.5),
@@ -1645,7 +1653,6 @@ function normalizeFlagName(rawName) {
     "--review-policy": "reviewPolicy",
     "--promotion-policy": "promotionPolicy",
     "--eval-model": "evalModel",
-    "--analysis-model": "analysisModel",
     "--proposal-model": "proposalModel",
     "--base-hash": "baseHash",
     "--max-iterations": "maxIterations",
@@ -1654,6 +1661,9 @@ function normalizeFlagName(rawName) {
     "--max-output-tokens": "maxOutputTokens",
     "--max-sql-queries": "maxSqlQueries",
     "--max-duration": "maxDuration",
+    "--max-agent-turns": "maxAgentTurns",
+    "--max-validation-attempts": "maxValidationAttempts",
+    "--max-targeted-evals": "maxTargetedEvals",
     "--min-improvement": "minImprovement",
     "--max-regressions": "maxRegressions",
     "--target-pass-rate": "targetPassRate",
@@ -1903,11 +1913,12 @@ Data products:
     and --use-semantic-layer or --no-semantic-layer
   Optimization:
     answerlayer optimize start --name NAME --connection ID --suite ID --model MODEL
-    [--eval-model MODEL] [--proposal-model MODEL] [--analysis-model MODEL]
+    [--eval-model MODEL] [--proposal-model MODEL]
     [--mode recommendation|supervised|fully_automatic]
     [--component entities,relationships,measures,metrics,dimensions,filters]
     [--review-policy every_sweep|exceptions_only|end_of_run]
     [--promotion-policy manual|automatic] [--max-iterations N]
+    [--max-agent-turns N] [--max-validation-attempts N] [--max-targeted-evals N]
     answerlayer optimize promote RUN_ID --base-hash SHA256
     update accepts --label <name>
   answerlayer ontologies list|create|get|validate
