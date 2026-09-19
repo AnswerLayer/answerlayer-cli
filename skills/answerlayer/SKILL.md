@@ -180,9 +180,11 @@ to see exact flags before using one:
 - `dashboards`, `tiles` — build and read dashboards
 - `documents` — upload business-context docs and link them to connections
 - `connections` — create / test / inspect schema
-- `pipelines` — upload immutable package revisions, validate and promote them,
-  run/retry/cancel exact revisions, inspect runs, and archive pipelines; use
-  `--wait --json` for automation and never put credentials in package config
+- `pipelines` — create, inspect, update, enable, disable, and archive pipelines;
+  upload immutable packages; list, inspect, diff, validate, promote, and roll
+  back revisions; and run/retry/cancel exact revisions. Use `--wait --json` for
+  automation. Never put credentials or CA material in package configuration;
+  rollback selects a previously promoted revision instead of uploading a copy
 - `metadata`, `api-keys`, `users`, `org`, `billing`, `stats`
 
 ## Conventions
