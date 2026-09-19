@@ -233,6 +233,9 @@ async function handlePipelines(client, command, positionals, parsed, io) {
         ? null
         : firstValue(parsed.flags.description),
     });
+    if (parsed.flags.clearDescription && payload.description !== null) {
+      throw usage("pipelines update cannot combine --clear-description with input data containing description");
+    }
     if (Object.keys(payload).length === 0) {
       throw usage("pipelines update requires --name, --description, --clear-description, or --data");
     }
