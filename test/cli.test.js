@@ -1982,6 +1982,301 @@ test("evals runs analyze preserves structured findings and evidence identifiers"
   assert.deepEqual(JSON.parse(output.text()), analysis);
 });
 
+test("pipelines list includes archived resources only when requested", async () => {
+  const originalFetch = globalThis.fetch;
+  const output = captureStream();
+
+  globalThis.fetch = async (url, init) => {
+    assert.equal(
+      String(url),
+      "https://answerlayer.example/api/v1/api-pipelines?include_archived=true",
+    );
+    assert.equal(init.method, "GET");
+    return new Response(JSON.stringify([{ id: "pipeline-1", name: "REMPLAN", status: "active" }]), {
+      status: 200,
+      headers: { "content-type": "application/json" },
+    });
+  };
+
+  try {
+    await main([
+      "pipelines", "list",
+      "--include-archived",
+      "--base-url", "https://answerlayer.example",
+      "--api-key", "al_live_test",
+      "--json",
+    ], {
+      env: {},
+      stdin: readableStdin(),
+      stdout: output,
+      stderr: captureStream(),
+    });
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+
+  assert.deepEqual(JSON.parse(output.text()), [
+    { id: "pipeline-1", name: "REMPLAN", status: "active" },
+  ]);
+});
+
+test("pipelines create submits name and description", async () => {
+  const originalFetch = globalThis.fetch;
+  const output = captureStream();
+
+  globalThis.fetch = async (url, init) => {
+    assert.equal(String(url), "https://answerlayer.example/api/v1/api-pipelines");
+    assert.equal(init.method, "POST");
+    assert.deepEqual(JSON.parse(init.body), {
+      name: "REMPLAN Census",
+      description: "Customer-owned census pipeline",
+    });
+    return new Response(JSON.stringify({ id: "pipeline-1", status: "draft" }), {
+      status: 201,
+      headers: { "content-type": "application/json" },
+    });
+  };
+
+  try {
+    await main([
+      "pipelines", "create",
+      "--name", "REMPLAN Census",
+      "--description", "Customer-owned census pipeline",
+      "--base-url", "https://answerlayer.example",
+      "--api-key", "al_live_test",
+    ], {
+      env: {},
+      stdin: readableStdin(),
+      stdout: output,
+      stderr: captureStream(),
+    });
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+
+  assert.deepEqual(JSON.parse(output.text()), { id: "pipeline-1", status: "draft" });
+});
+
+test("pipelines revisions push uploads the package and non-secret config", async () => {
+  const originalFetch = globalThis.fetch;
+  const output = captureStream();
+  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "al-cli-pipeline-"));
+  const packagePath = path.join(tempDir, "pipeline.zip");
+  const configPath = path.join(tempDir, "config.json");
+  fs.writeFileSync(packagePath, "fixture package");
+  fs.writeFileSync(configPath, JSON.stringify({ years: [2016, 2021] }));
+
+  globalThis.fetch = async (url, init) => {
+    assert.equal(
+      String(url),
+      "https://answerlayer.example/api/v1/api-pipelines/pipeline-1/revisions",
+    );
+    assert.equal(init.method, "POST");
+    assert.ok(init.body instanceof FormData);
+    assert.equal(init.headers["Content-Type"], undefined);
+    assert.equal(init.body.get("package").name, "pipeline.zip");
+    assert.deepEqual(JSON.parse(init.body.get("config_json")), { years: [2016, 2021] });
+    return new Response(JSON.stringify({ id: "revision-1", revision_number: 1 }), {
+      status: 201,
+      headers: { "content-type": "application/json" },
+    });
+  };
+
+  try {
+    await main([
+      "pipelines", "revisions", "push", "pipeline-1",
+      "--package", packagePath,
+      "--config-file", configPath,
+      "--base-url", "https://answerlayer.example",
+      "--api-key", "al_live_test",
+    ], {
+      env: {},
+      stdin: readableStdin(),
+      stdout: output,
+      stderr: captureStream(),
+    });
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+
+  assert.deepEqual(JSON.parse(output.text()), { id: "revision-1", revision_number: 1 });
+});
+
+test("pipelines revisions validate waits for the exact run", async () => {
+  const originalFetch = globalThis.fetch;
+  const output = captureStream();
+  const errorOutput = captureStream();
+  const requests = [];
+
+  globalThis.fetch = async (url, init) => {
+    requests.push([init.method, new URL(String(url)).pathname]);
+    const status = requests.length === 1 ? "running" : "succeeded";
+    return new Response(JSON.stringify({ id: "run-1", status, summary: { fixtures: 1 } }), {
+      status: requests.length === 1 ? 202 : 200,
+      headers: { "content-type": "application/json" },
+    });
+  };
+
+  try {
+    await main([
+      "pipelines", "revisions", "validate", "pipeline-1", "revision-1",
+      "--wait",
+      "--poll-interval", "0",
+      "--base-url", "https://answerlayer.example",
+      "--api-key", "al_live_test",
+      "--json",
+    ], {
+      env: {},
+      stdin: readableStdin(),
+      stdout: output,
+      stderr: errorOutput,
+      sleep: async () => {},
+    });
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+
+  assert.deepEqual(requests, [
+    ["POST", "/api/v1/api-pipelines/pipeline-1/revisions/revision-1/validate"],
+    ["GET", "/api/v1/api-pipelines/pipeline-1/runs/run-1"],
+  ]);
+  assert.deepEqual(JSON.parse(output.text()), {
+    id: "run-1",
+    status: "succeeded",
+    summary: { fixtures: 1 },
+  });
+  assert.match(errorOutput.text(), /Waiting for pipeline run run-1/);
+});
+
+test("pipelines runs start returns failure evidence and a failing exit", async () => {
+  const originalFetch = globalThis.fetch;
+  const output = captureStream();
+  let requestCount = 0;
+
+  globalThis.fetch = async () => {
+    requestCount += 1;
+    const status = requestCount === 1 ? "running" : "failed";
+    return new Response(JSON.stringify({
+      id: "run-2",
+      status,
+      error: status === "failed" ? "Fixture contract failed" : null,
+    }), {
+      status: requestCount === 1 ? 202 : 200,
+      headers: { "content-type": "application/json" },
+    });
+  };
+
+  try {
+    await assert.rejects(
+      main([
+        "pipelines", "runs", "start", "pipeline-1",
+        "--wait",
+        "--poll-interval", "0",
+        "--base-url", "https://answerlayer.example",
+        "--api-key", "al_live_test",
+        "--json",
+      ], {
+        env: {},
+        stdin: readableStdin(),
+        stdout: output,
+        stderr: captureStream(),
+        sleep: async () => {},
+      }),
+      error => error.exitCode === 1 && /Fixture contract failed/.test(error.message),
+    );
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+
+  assert.deepEqual(JSON.parse(output.text()), {
+    id: "run-2",
+    status: "failed",
+    error: "Fixture contract failed",
+  });
+});
+
+test("pipeline lifecycle commands target exact revisions and runs", async () => {
+  const originalFetch = globalThis.fetch;
+  const cases = [
+    {
+      argv: ["pipelines", "revisions", "promote", "pipeline-1", "revision-1"],
+      method: "POST",
+      pathname: "/api/v1/api-pipelines/pipeline-1/revisions/revision-1/promote",
+    },
+    {
+      argv: ["pipelines", "runs", "get", "pipeline-1", "run-1"],
+      method: "GET",
+      pathname: "/api/v1/api-pipelines/pipeline-1/runs/run-1",
+    },
+    {
+      argv: ["pipelines", "runs", "retry", "pipeline-1", "run-1"],
+      method: "POST",
+      pathname: "/api/v1/api-pipelines/pipeline-1/runs/run-1/retry",
+    },
+    {
+      argv: ["pipelines", "runs", "cancel", "pipeline-1", "run-1"],
+      method: "POST",
+      pathname: "/api/v1/api-pipelines/pipeline-1/runs/run-1/cancel",
+    },
+    {
+      argv: ["pipelines", "archive", "pipeline-1"],
+      method: "DELETE",
+      pathname: "/api/v1/api-pipelines/pipeline-1",
+    },
+  ];
+
+  try {
+    for (const testCase of cases) {
+      const output = captureStream();
+      globalThis.fetch = async (url, init) => {
+        assert.equal(init.method, testCase.method);
+        assert.equal(new URL(String(url)).pathname, testCase.pathname);
+        return new Response(JSON.stringify({ ok: true }), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        });
+      };
+      await main([
+        ...testCase.argv,
+        "--base-url", "https://answerlayer.example",
+        "--api-key", "al_live_test",
+      ], {
+        env: {},
+        stdin: readableStdin(),
+        stdout: output,
+        stderr: captureStream(),
+      });
+      assert.deepEqual(JSON.parse(output.text()), { ok: true });
+    }
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test("pipelines revisions push rejects non-object configuration", async () => {
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async () => assert.fail("API should not be called");
+
+  try {
+    await assert.rejects(
+      main([
+        "pipelines", "revisions", "push", "pipeline-1", "fixture.zip",
+        "--config", "[]",
+        "--base-url", "https://answerlayer.example",
+        "--api-key", "al_live_test",
+      ], {
+        env: {},
+        stdin: readableStdin(),
+        stdout: captureStream(),
+        stderr: captureStream(),
+      }),
+      /config must be a JSON object/,
+    );
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
 function readableStdin() {
   const stream = Readable.from([]);
   stream.isTTY = true;

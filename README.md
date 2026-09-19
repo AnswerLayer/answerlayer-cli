@@ -83,6 +83,46 @@ export ANSWERLAYER_BASE_URL=https://answerlayer.your-company.com  # optional ove
 
 The CLI sends API keys using the `X-API-Key` header.
 
+## Operate API pipelines
+
+API pipeline authoring and lifecycle operations are CLI-first. The AnswerLayer
+web application is a read-only observability surface for pipeline health, run
+history, provenance, and failures.
+
+Create a pipeline and upload an immutable package revision:
+
+```bash
+answerlayer pipelines create --name "REMPLAN Census" --json
+answerlayer pipelines revisions push <pipeline-id> \
+  --package ./dist/remplan-census.zip \
+  --config-file ./pipeline-config.json \
+  --json
+```
+
+Validate and promote the returned revision ID. `--wait` polls the exact run to
+a terminal state and exits unsuccessfully when validation fails or is
+cancelled:
+
+```bash
+answerlayer pipelines revisions validate <pipeline-id> <revision-id> --wait --json
+answerlayer pipelines revisions promote <pipeline-id> <revision-id> --json
+```
+
+Run and operate the promoted revision:
+
+```bash
+answerlayer pipelines runs start <pipeline-id> --wait --json
+answerlayer pipelines runs get <pipeline-id> <run-id> --json
+answerlayer pipelines runs retry <pipeline-id> <run-id> --wait --json
+answerlayer pipelines runs cancel <pipeline-id> <run-id> --json
+answerlayer pipelines archive <pipeline-id> --json
+```
+
+Use `--include-archived` with `pipelines list`. Package ZIPs are built from the
+customer-owned package repository; credentials and CA material must not be
+included in the ZIP or revision configuration. They remain in the install's
+managed secret interfaces.
+
 ## Run locally with an agent
 
 The package includes an `answerlayer` agent skill for evaluating AnswerLayer

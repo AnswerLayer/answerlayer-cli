@@ -48,6 +48,7 @@ export async function main(argv, io) {
   if (group === "openapi") return handleOpenApi(client, parsed, io);
   if (group === "auth") return handleAuth(client, command, parsed, io);
   if (group === "api-keys" || group === "keys") return handleApiKeys(client, command, positionals, parsed, io);
+  if (group === "pipelines" || group === "pipeline") return handlePipelines(client, command, positionals, parsed, io);
   if (group === "connections") return handleConnections(client, command, positionals, parsed, io);
   if (group === "metadata") return handleMetadata(client, command, positionals, parsed, io);
   if (group === "query") return handleQuery(client, command, positionals, parsed, io);
@@ -183,6 +184,127 @@ async function handleApiKeys(client, command, positionals, parsed, io) {
   }
 
   throw usage(`Unknown api-keys command: ${command}`);
+}
+
+async function handlePipelines(client, command, positionals, parsed, io) {
+  const base = "/api/v1/api-pipelines";
+
+  if (command === "list" || !command) {
+    return requestAndPrint(client, "GET", base, parsed, io, {
+      query: { include_archived: Boolean(parsed.flags.includeArchived) },
+      table: [
+        { key: "id", label: "ID" },
+        { key: "name", label: "Name" },
+        { key: "status", label: "Status" },
+        { key: "active_revision_id", label: "Active revision" },
+        { key: "updated_at", label: "Updated" },
+      ],
+    });
+  }
+
+  if (command === "create") {
+    const payload = await readData(parsed.flags, io, {
+      name: firstValue(parsed.flags.name),
+      description: firstValue(parsed.flags.description),
+    });
+    requirePayloadValue(payload, "name", "pipelines create requires --name");
+    return requestAndPrint(client, "POST", base, parsed, io, { body: payload });
+  }
+
+  if (command === "archive") {
+    const pipelineId = requirePositional(positionals, 0, "pipeline id");
+    return requestAndPrint(
+      client,
+      "DELETE",
+      `${base}/${encodeURIComponent(pipelineId)}`,
+      parsed,
+      io,
+    );
+  }
+
+  if (command === "revisions") {
+    return handlePipelineRevisions(client, base, positionals, parsed, io);
+  }
+
+  if (command === "runs") {
+    return handlePipelineRuns(client, base, positionals, parsed, io);
+  }
+
+  throw usage(`Unknown pipelines command: ${command}`);
+}
+
+async function handlePipelineRevisions(client, base, positionals, parsed, io) {
+  const action = requirePositional(positionals, 0, "pipeline revisions action");
+  const pipelineId = requirePositional(positionals, 1, "pipeline id");
+  const pipelinePath = `${base}/${encodeURIComponent(pipelineId)}`;
+
+  if (action === "push" || action === "upload") {
+    const packagePath = firstValue(parsed.flags.package)
+      || requirePositional(positionals, 2, "pipeline package ZIP");
+    const config = readPipelineRevisionConfig(parsed.flags);
+    return requestAndPrint(client, "POST", `${pipelinePath}/revisions`, parsed, io, {
+      body: multipartFields({
+        files: { package: packagePath },
+        fields: { config_json: JSON.stringify(config) },
+      }),
+    });
+  }
+
+  const revisionId = requirePositional(positionals, 2, "pipeline revision id");
+  const revisionPath = `${pipelinePath}/revisions/${encodeURIComponent(revisionId)}`;
+  if (action === "validate") {
+    return requestWaitAndPrint(
+      client,
+      "POST",
+      `${revisionPath}/validate`,
+      parsed,
+      io,
+      pipelinePath,
+    );
+  }
+  if (action === "promote") {
+    return requestAndPrint(client, "POST", `${revisionPath}/promote`, parsed, io);
+  }
+
+  throw usage(`Unknown pipelines revisions command: ${action}`);
+}
+
+async function handlePipelineRuns(client, base, positionals, parsed, io) {
+  const action = requirePositional(positionals, 0, "pipeline runs action");
+  const pipelineId = requirePositional(positionals, 1, "pipeline id");
+  const pipelinePath = `${base}/${encodeURIComponent(pipelineId)}`;
+
+  if (action === "start" || action === "run") {
+    return requestWaitAndPrint(
+      client,
+      "POST",
+      `${pipelinePath}/runs`,
+      parsed,
+      io,
+      pipelinePath,
+    );
+  }
+
+  const runId = requirePositional(positionals, 2, "pipeline run id");
+  const runPath = `${pipelinePath}/runs/${encodeURIComponent(runId)}`;
+  if (action === "get") {
+    return requestAndPrint(client, "GET", runPath, parsed, io);
+  }
+  if (action === "retry") {
+    return requestWaitAndPrint(
+      client,
+      "POST",
+      `${runPath}/retry`,
+      parsed,
+      io,
+      pipelinePath,
+    );
+  }
+  if (action === "cancel") {
+    return requestAndPrint(client, "POST", `${runPath}/cancel`, parsed, io);
+  }
+
+  throw usage(`Unknown pipelines runs command: ${action}`);
 }
 
 async function handleConnections(client, command, positionals, parsed, io) {
@@ -1461,13 +1583,36 @@ async function readData(flags, io, defaults = {}) {
   return dropUndefined({ ...defaults, ...data });
 }
 
+function readPipelineRevisionConfig(flags) {
+  const file = firstValue(flags.configFile);
+  const inline = firstValue(flags.config);
+  if (file && inline) {
+    throw usage("pipelines revisions push accepts either --config-file or --config, not both");
+  }
+  const value = file
+    ? parseJsonFlag(fs.readFileSync(file, "utf8"), "config-file")
+    : inline
+      ? parseJsonFlag(inline, "config")
+      : {};
+  if (!value || Array.isArray(value) || typeof value !== "object") {
+    throw usage("pipeline revision config must be a JSON object");
+  }
+  return value;
+}
+
 function multipart({ file, fields = {} }) {
+  return multipartFields({ files: { file }, fields });
+}
+
+function multipartFields({ files = {}, fields = {} }) {
   const form = new FormData();
   for (const [key, value] of Object.entries(dropUndefined(fields))) {
     form.append(key, String(value));
   }
-  const buffer = fs.readFileSync(file);
-  form.append("file", new Blob([buffer]), path.basename(file));
+  for (const [key, file] of Object.entries(files)) {
+    const buffer = fs.readFileSync(file);
+    form.append(key, new Blob([buffer]), path.basename(file));
+  }
   return form;
 }
 
@@ -1498,6 +1643,70 @@ async function requestAndPrint(client, method, pathName, parsed, io, options = {
     headers: options.headers,
   });
 
+  return printResult(result, parsed, io, options);
+}
+
+async function requestWaitAndPrint(
+  client,
+  method,
+  pathName,
+  parsed,
+  io,
+  pipelinePath,
+) {
+  let result = await client.rawRequest(method, pathName);
+  if (parsed.flags.wait) {
+    result = await waitForPipelineRun(client, result, parsed.flags, io, pipelinePath);
+  }
+  printResult(result, parsed, io);
+  if (parsed.flags.wait && ["failed", "cancelled"].includes(result.data?.status)) {
+    const error = new Error(
+      result.data.error
+        ? `Pipeline run ${result.data.id} ${result.data.status}: ${result.data.error}`
+        : `Pipeline run ${result.data.id} ${result.data.status}`,
+    );
+    error.exitCode = 1;
+    throw error;
+  }
+}
+
+async function waitForPipelineRun(client, initial, flags, io, pipelinePath) {
+  const runId = initial.data?.id;
+  if (!runId) throw new Error("Pipeline run response did not include an id");
+  const terminal = new Set(["succeeded", "failed", "cancelled"]);
+  const timeoutSeconds = parsePositiveNumber(
+    firstValue(flags.waitTimeout),
+    "wait-timeout",
+    600,
+  );
+  const pollSeconds = parsePositiveNumber(
+    firstValue(flags.pollInterval),
+    "poll-interval",
+    2,
+    { allowZero: true },
+  );
+  const now = io.now || (() => Date.now());
+  const sleep = io.sleep || (milliseconds => new Promise(resolve => setTimeout(resolve, milliseconds)));
+  const deadline = now() + timeoutSeconds * 1000;
+  let result = initial;
+
+  write(io.stderr, `Waiting for pipeline run ${runId}...\n`);
+  while (!terminal.has(result.data?.status)) {
+    if (now() >= deadline) {
+      const error = new Error(`Timed out waiting for pipeline run ${runId}`);
+      error.exitCode = 1;
+      throw error;
+    }
+    await sleep(pollSeconds * 1000);
+    result = await client.rawRequest(
+      "GET",
+      `${pipelinePath}/runs/${encodeURIComponent(runId)}`,
+    );
+  }
+  return result;
+}
+
+function printResult(result, parsed, io, options = {}) {
   const output = firstValue(parsed.flags.output);
   if (output) {
     fs.writeFileSync(output, result.buffer);
@@ -1607,6 +1816,12 @@ function normalizeFlagName(rawName) {
     "--type": "type",
     "--db-type": "dbType",
     "--config": "config",
+    "--config-file": "configFile",
+    "--package": "package",
+    "--include-archived": "includeArchived",
+    "--wait": "wait",
+    "--wait-timeout": "waitTimeout",
+    "--poll-interval": "pollInterval",
     "--file": "file",
     "-f": "file",
     "--sql": "sql",
@@ -1718,7 +1933,7 @@ function normalizeFlagName(rawName) {
 }
 
 function isBooleanFlag(rawName) {
-  return ["--json", "--help", "-h", "--include", "-i", "--raw", "--admin", "--force", "--follow", "--active", "--inactive", "--include-inactive", "--include-semantic-snapshot", "--use-semantic-layer", "--no-semantic-layer", "--no-demo", "--yes", "-y"].includes(rawName);
+  return ["--json", "--help", "-h", "--include", "-i", "--raw", "--admin", "--force", "--follow", "--active", "--inactive", "--include-inactive", "--include-semantic-snapshot", "--include-archived", "--use-semantic-layer", "--no-semantic-layer", "--no-demo", "--yes", "-y", "--wait"].includes(rawName);
 }
 
 function setFlag(flags, name, value) {
@@ -1756,6 +1971,16 @@ function parseNumber(value, name) {
   if (value === undefined || value === null || value === "") return undefined;
   const parsed = Number(value);
   if (!Number.isFinite(parsed)) throw usage(`Expected a number for --${name}, received ${value}`);
+  return parsed;
+}
+
+function parsePositiveNumber(value, name, fallback, { allowZero = false } = {}) {
+  if (value === undefined || value === null || value === "") return fallback;
+  const parsed = Number(value);
+  const minimum = allowZero ? 0 : Number.EPSILON;
+  if (!Number.isFinite(parsed) || parsed < minimum) {
+    throw usage(`Expected --${name} to be ${allowZero ? "zero or " : ""}greater than zero`);
+  }
   return parsed;
 }
 
@@ -1888,6 +2113,9 @@ Usage:
 
 Core:
   answerlayer api-keys list|create|revoke
+  answerlayer pipelines list|create|archive
+  answerlayer pipelines revisions push|validate|promote <pipeline-id> [revision-id]
+  answerlayer pipelines runs start|get|retry|cancel <pipeline-id> [run-id]
   answerlayer connections supported|list|get|create|update|delete|schema|test
   answerlayer metadata structure|tables|columns|pii-summary|pii-settings|detect-pii
   answerlayer query run|validate|export <connection-id> --sql <sql>
@@ -1951,6 +2179,15 @@ Common options:
   --data <json>          Structured request payload.
   --data-file <path>     Structured request payload file.
   --output, -o <path>    Write response bytes to a file.
+
+Pipeline options:
+  --package <path>       Package ZIP for pipelines revisions push.
+  --config-file <path>   Non-secret revision configuration JSON file.
+  --config <json>        Inline non-secret revision configuration.
+  --include-archived     Include archived pipelines when listing.
+  --wait                 Poll validation or execution to a terminal state.
+  --wait-timeout <sec>   Maximum wait time. Default: 600.
+  --poll-interval <sec>  Poll interval. Default: 2.
 
 SQL options:
   --sql, -q <sql>        SQL text.
