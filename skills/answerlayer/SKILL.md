@@ -1,6 +1,6 @@
 ---
 name: answerlayer
-description: Query databases in natural language with AnswerLayer. Use when the user wants to set up or configure AnswerLayer, connect to their data, ask analytical or business questions about a database (revenue, users, counts, "top N", trends, metrics), run SQL through AnswerLayer, or manage AnswerLayer connections, saved queries, the semantic layer, or dashboards.
+description: Query databases and operate customer-owned API pipelines with AnswerLayer. Use when the user wants to set up or configure AnswerLayer, connect to their data, ask analytical or business questions about a database, run SQL, or manage AnswerLayer API pipelines, connections, saved queries, the semantic layer, or dashboards.
 ---
 
 # AnswerLayer
@@ -180,6 +180,9 @@ to see exact flags before using one:
 - `dashboards`, `tiles` — build and read dashboards
 - `documents` — upload business-context docs and link them to connections
 - `connections` — create / test / inspect schema
+- `pipelines` — upload immutable package revisions, validate and promote them,
+  run/retry/cancel exact revisions, inspect runs, and archive pipelines; use
+  `--wait --json` for automation and never put credentials in package config
 - `metadata`, `api-keys`, `users`, `org`, `billing`, `stats`
 
 ## Conventions
