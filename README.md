@@ -119,6 +119,10 @@ cancelled:
 
 ```bash
 answerlayer pipelines revisions validate <pipeline-id> <revision-id> --wait --json
+answerlayer pipelines revisions connection-test <pipeline-id> <revision-id> --wait --json
+answerlayer pipelines revisions probe <pipeline-id> <revision-id> \
+  --request-limit 2 --row-limit 100 --byte-limit 1048576 \
+  --runtime-limit 60 --wait --json
 answerlayer pipelines revisions promote <pipeline-id> <revision-id> --json
 ```
 

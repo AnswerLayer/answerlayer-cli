@@ -180,7 +180,8 @@ to see exact flags before using one:
 - `dashboards`, `tiles` — build and read dashboards
 - `documents` — upload business-context docs and link them to connections
 - `connections` — create / test / inspect schema
-- `pipelines` — create, inspect, update, enable, disable, and archive pipelines;
+- `pipelines` — create, inspect, update, validate, connection-test, bounded-probe,
+  promote, enable, disable, and archive pipelines;
   upload immutable packages; list, inspect, diff, validate, promote, and roll
   back revisions; and run/retry/cancel exact revisions. Use `--wait --json` for
   automation. Never put credentials or CA material in package configuration;

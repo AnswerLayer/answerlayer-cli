@@ -333,6 +333,33 @@ async function handlePipelineRevisions(client, base, positionals, parsed, io) {
       pipelinePath,
     );
   }
+  if (action === "connection-test" || action === "test-connection") {
+    return requestWaitAndPrint(
+      client,
+      "POST",
+      `${revisionPath}/connection-test`,
+      parsed,
+      io,
+      pipelinePath,
+    );
+  }
+  if (action === "probe" || action === "dry-run") {
+    const body = {
+      request_limit: requiredBoundedFlag(parsed.flags.requestLimit, "request-limit", 1, 100),
+      row_limit: requiredBoundedFlag(parsed.flags.rowLimit, "row-limit", 1, 100000),
+      byte_limit: requiredBoundedFlag(parsed.flags.byteLimit, "byte-limit", 1024, 100 * 1024 * 1024),
+      runtime_limit_seconds: requiredBoundedFlag(parsed.flags.runtimeLimit, "runtime-limit", 1, 900),
+    };
+    return requestWaitAndPrint(
+      client,
+      "POST",
+      `${revisionPath}/probe`,
+      parsed,
+      io,
+      pipelinePath,
+      { body },
+    );
+  }
   if (action === "promote") {
     return requestAndPrint(client, "POST", `${revisionPath}/promote`, parsed, io);
   }
@@ -1727,8 +1754,9 @@ async function requestWaitAndPrint(
   parsed,
   io,
   pipelinePath,
+  options = {},
 ) {
-  let result = await client.rawRequest(method, pathName);
+  let result = await client.rawRequest(method, pathName, { body: options.body });
   if (parsed.flags.wait) {
     result = await waitForPipelineRun(client, result, parsed.flags, io, pipelinePath);
   }
@@ -2072,6 +2100,14 @@ function parseBoundedInteger(value, name, minimum, maximum) {
   return parsed;
 }
 
+function requiredBoundedFlag(value, name, minimum, maximum) {
+  const first = firstValue(value);
+  if (first === undefined || first === "") {
+    throw usage(`pipelines revisions probe requires --${name}`);
+  }
+  return parseBoundedInteger(first, name, minimum, maximum);
+}
+
 function requirePositional(positionals, index, label) {
   const value = positionals[index];
   if (!value) throw usage(`Missing ${label}`);
@@ -2190,7 +2226,7 @@ Usage:
 Core:
   answerlayer api-keys list|create|revoke
   answerlayer pipelines list|create|get|update|enable|disable|archive
-  answerlayer pipelines revisions list|get|push|validate|promote|diff|rollback <pipeline-id> [revision-id]
+  answerlayer pipelines revisions list|get|push|validate|connection-test|probe|promote|diff|rollback <pipeline-id> [revision-id]
   answerlayer pipelines runs start|get|retry|cancel <pipeline-id> [run-id]
   answerlayer connections supported|list|get|create|update|delete|schema|test
   answerlayer metadata structure|tables|columns|pii-summary|pii-settings|detect-pii
@@ -2266,6 +2302,10 @@ Pipeline options:
   --wait                 Poll validation or execution to a terminal state.
   --wait-timeout <sec>   Maximum wait time. Default: 600.
   --poll-interval <sec>  Poll interval. Default: 2.
+  --request-limit <n>    Probe dataset/request ceiling (1-100; required).
+  --row-limit <n>        Probe row ceiling (1-100000; required).
+  --byte-limit <n>       Probe decoded-byte ceiling (1024-104857600; required).
+  --runtime-limit <sec>  Probe runtime ceiling (1-900; required).
 
 SQL options:
   --sql, -q <sql>        SQL text.
