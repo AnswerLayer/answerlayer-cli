@@ -99,6 +99,20 @@ answerlayer pipelines revisions push <pipeline-id> \
   --json
 ```
 
+Inspect and update pipeline metadata, or explicitly pause and resume new
+production executions without losing the active revision:
+
+```bash
+answerlayer pipelines get <pipeline-id> --json
+answerlayer pipelines update <pipeline-id> --description "National census" --json
+answerlayer pipelines disable <pipeline-id> --json
+answerlayer pipelines enable <pipeline-id> --json
+```
+
+Use `--clear-description` to remove the description. Disabling a pipeline does
+not prevent administrators from uploading and validating a replacement
+revision; it prevents production execution until the pipeline is enabled.
+
 Validate and promote the returned revision ID. `--wait` polls the exact run to
 a terminal state and exits unsuccessfully when validation fails or is
 cancelled:
@@ -108,6 +122,20 @@ answerlayer pipelines revisions validate <pipeline-id> <revision-id> --wait --js
 answerlayer pipelines revisions promote <pipeline-id> <revision-id> --json
 ```
 
+Revision history is immutable and inspectable. Compare the candidate revision
+against the current or previous revision before promotion:
+
+```bash
+answerlayer pipelines revisions list <pipeline-id> --json
+answerlayer pipelines revisions get <pipeline-id> <revision-id> --json
+answerlayer pipelines revisions diff <pipeline-id> <candidate-revision-id> \
+  --against <base-revision-id> --json
+```
+
+The diff contains artifact hashes and a secret-safe, JSON-pointer-addressed
+configuration diff. Configuration descriptors are digest-verified before they
+are returned.
+
 Run and operate the promoted revision:
 
 ```bash
@@ -116,6 +144,14 @@ answerlayer pipelines runs get <pipeline-id> <run-id> --json
 answerlayer pipelines runs retry <pipeline-id> <run-id> --wait --json
 answerlayer pipelines runs cancel <pipeline-id> <run-id> --json
 answerlayer pipelines archive <pipeline-id> --json
+```
+
+Roll back by selecting a revision that was previously promoted. This moves the
+active pointer back to the existing immutable revision; it does not copy or
+re-upload the package:
+
+```bash
+answerlayer pipelines revisions rollback <pipeline-id> <revision-id> --json
 ```
 
 Use `--include-archived` with `pipelines list`. Package ZIPs are built from the

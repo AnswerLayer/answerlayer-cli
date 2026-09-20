@@ -211,6 +211,55 @@ async function handlePipelines(client, command, positionals, parsed, io) {
     return requestAndPrint(client, "POST", base, parsed, io, { body: payload });
   }
 
+  if (command === "get") {
+    const pipelineId = requirePositional(positionals, 0, "pipeline id");
+    return requestAndPrint(
+      client,
+      "GET",
+      `${base}/${encodeURIComponent(pipelineId)}`,
+      parsed,
+      io,
+    );
+  }
+
+  if (command === "update") {
+    const pipelineId = requirePositional(positionals, 0, "pipeline id");
+    if (parsed.flags.clearDescription && parsed.flags.description !== undefined) {
+      throw usage("pipelines update accepts either --description or --clear-description, not both");
+    }
+    const payload = await readData(parsed.flags, io, {
+      name: firstValue(parsed.flags.name),
+      description: parsed.flags.clearDescription
+        ? null
+        : firstValue(parsed.flags.description),
+    });
+    if (parsed.flags.clearDescription && payload.description !== null) {
+      throw usage("pipelines update cannot combine --clear-description with input data containing description");
+    }
+    if (Object.keys(payload).length === 0) {
+      throw usage("pipelines update requires --name, --description, --clear-description, or --data");
+    }
+    return requestAndPrint(
+      client,
+      "PATCH",
+      `${base}/${encodeURIComponent(pipelineId)}`,
+      parsed,
+      io,
+      { body: payload },
+    );
+  }
+
+  if (command === "enable" || command === "disable") {
+    const pipelineId = requirePositional(positionals, 0, "pipeline id");
+    return requestAndPrint(
+      client,
+      "POST",
+      `${base}/${encodeURIComponent(pipelineId)}/${command}`,
+      parsed,
+      io,
+    );
+  }
+
   if (command === "archive") {
     const pipelineId = requirePositional(positionals, 0, "pipeline id");
     return requestAndPrint(
@@ -238,6 +287,18 @@ async function handlePipelineRevisions(client, base, positionals, parsed, io) {
   const pipelineId = requirePositional(positionals, 1, "pipeline id");
   const pipelinePath = `${base}/${encodeURIComponent(pipelineId)}`;
 
+  if (action === "list") {
+    return requestAndPrint(client, "GET", `${pipelinePath}/revisions`, parsed, io, {
+      table: [
+        { key: "id", label: "ID" },
+        { key: "revision_number", label: "Revision" },
+        { key: "status", label: "Status" },
+        { key: "artifact_sha256", label: "Artifact SHA-256" },
+        { key: "created_at", label: "Created" },
+      ],
+    });
+  }
+
   if (action === "push" || action === "upload") {
     const packagePath = firstValue(parsed.flags.package)
       || requirePositional(positionals, 2, "pipeline package ZIP");
@@ -252,6 +313,16 @@ async function handlePipelineRevisions(client, base, positionals, parsed, io) {
 
   const revisionId = requirePositional(positionals, 2, "pipeline revision id");
   const revisionPath = `${pipelinePath}/revisions/${encodeURIComponent(revisionId)}`;
+  if (action === "get") {
+    return requestAndPrint(client, "GET", revisionPath, parsed, io);
+  }
+  if (action === "diff") {
+    const against = firstValue(parsed.flags.against);
+    if (!against) throw usage("pipelines revisions diff requires --against <revision-id>");
+    return requestAndPrint(client, "GET", `${revisionPath}/diff`, parsed, io, {
+      query: { against },
+    });
+  }
   if (action === "validate") {
     return requestWaitAndPrint(
       client,
@@ -264,6 +335,9 @@ async function handlePipelineRevisions(client, base, positionals, parsed, io) {
   }
   if (action === "promote") {
     return requestAndPrint(client, "POST", `${revisionPath}/promote`, parsed, io);
+  }
+  if (action === "rollback") {
+    return requestAndPrint(client, "POST", `${revisionPath}/rollback`, parsed, io);
   }
 
   throw usage(`Unknown pipelines revisions command: ${action}`);
@@ -1811,12 +1885,14 @@ function normalizeFlagName(rawName) {
     "--name": "name",
     "--title": "title",
     "--description": "description",
+    "--clear-description": "clearDescription",
     "--visibility": "visibility",
     "--connection": "connection",
     "--type": "type",
     "--db-type": "dbType",
     "--config": "config",
     "--config-file": "configFile",
+    "--against": "against",
     "--package": "package",
     "--include-archived": "includeArchived",
     "--wait": "wait",
@@ -1933,7 +2009,7 @@ function normalizeFlagName(rawName) {
 }
 
 function isBooleanFlag(rawName) {
-  return ["--json", "--help", "-h", "--include", "-i", "--raw", "--admin", "--force", "--follow", "--active", "--inactive", "--include-inactive", "--include-semantic-snapshot", "--include-archived", "--use-semantic-layer", "--no-semantic-layer", "--no-demo", "--yes", "-y", "--wait"].includes(rawName);
+  return ["--json", "--help", "-h", "--include", "-i", "--raw", "--admin", "--force", "--follow", "--active", "--inactive", "--include-inactive", "--include-semantic-snapshot", "--include-archived", "--clear-description", "--use-semantic-layer", "--no-semantic-layer", "--no-demo", "--yes", "-y", "--wait"].includes(rawName);
 }
 
 function setFlag(flags, name, value) {
@@ -2113,8 +2189,8 @@ Usage:
 
 Core:
   answerlayer api-keys list|create|revoke
-  answerlayer pipelines list|create|archive
-  answerlayer pipelines revisions push|validate|promote <pipeline-id> [revision-id]
+  answerlayer pipelines list|create|get|update|enable|disable|archive
+  answerlayer pipelines revisions list|get|push|validate|promote|diff|rollback <pipeline-id> [revision-id]
   answerlayer pipelines runs start|get|retry|cancel <pipeline-id> [run-id]
   answerlayer connections supported|list|get|create|update|delete|schema|test
   answerlayer metadata structure|tables|columns|pii-summary|pii-settings|detect-pii
@@ -2184,6 +2260,8 @@ Pipeline options:
   --package <path>       Package ZIP for pipelines revisions push.
   --config-file <path>   Non-secret revision configuration JSON file.
   --config <json>        Inline non-secret revision configuration.
+  --against <id>         Base revision for pipelines revisions diff.
+  --clear-description    Clear a pipeline description during update.
   --include-archived     Include archived pipelines when listing.
   --wait                 Poll validation or execution to a terminal state.
   --wait-timeout <sec>   Maximum wait time. Default: 600.

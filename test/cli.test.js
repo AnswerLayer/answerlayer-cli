@@ -2057,6 +2057,169 @@ test("pipelines create submits name and description", async () => {
   assert.deepEqual(JSON.parse(output.text()), { id: "pipeline-1", status: "draft" });
 });
 
+test("pipelines update can rename and explicitly clear description", async () => {
+  const originalFetch = globalThis.fetch;
+  const output = captureStream();
+
+  globalThis.fetch = async (url, init) => {
+    assert.equal(String(url), "https://answerlayer.example/api/v1/api-pipelines/pipeline-1");
+    assert.equal(init.method, "PATCH");
+    assert.deepEqual(JSON.parse(init.body), {
+      name: "National Census",
+      description: null,
+    });
+    return new Response(JSON.stringify({ id: "pipeline-1", status: "active" }), {
+      status: 200,
+      headers: { "content-type": "application/json" },
+    });
+  };
+
+  try {
+    await main([
+      "pipelines", "update", "pipeline-1",
+      "--name", "National Census",
+      "--clear-description",
+      "--base-url", "https://answerlayer.example",
+      "--api-key", "al_live_test",
+    ], {
+      env: {},
+      stdin: readableStdin(),
+      stdout: output,
+      stderr: captureStream(),
+    });
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+
+  assert.deepEqual(JSON.parse(output.text()), { id: "pipeline-1", status: "active" });
+});
+
+test("pipelines update rejects conflicting or empty input without making a request", async () => {
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async () => assert.fail("API should not be called");
+  const io = () => ({
+    env: {},
+    stdin: readableStdin(),
+    stdout: captureStream(),
+    stderr: captureStream(),
+  });
+  const auth = [
+    "--base-url", "https://answerlayer.example",
+    "--api-key", "al_live_test",
+  ];
+
+  try {
+    await assert.rejects(
+      main([
+        "pipelines", "update", "pipeline-1",
+        "--description", "keep me",
+        "--clear-description",
+        ...auth,
+      ], io()),
+      /either --description or --clear-description/,
+    );
+    await assert.rejects(
+      main([
+        "pipelines", "update", "pipeline-1",
+        "--clear-description",
+        "--data", JSON.stringify({ description: "override" }),
+        ...auth,
+      ], io()),
+      /cannot combine --clear-description with input data containing description/,
+    );
+    await assert.rejects(
+      main(["pipelines", "update", "pipeline-1", ...auth], io()),
+      /pipelines update requires/,
+    );
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test("pipelines update rejects piped description when clearing without making a request", async () => {
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async () => assert.fail("API should not be called");
+  const stdin = Readable.from([JSON.stringify({ description: "override" })]);
+
+  try {
+    await assert.rejects(
+      main([
+        "pipelines", "update", "pipeline-1",
+        "--clear-description",
+        "--base-url", "https://answerlayer.example",
+        "--api-key", "al_live_test",
+      ], {
+        env: {},
+        stdin,
+        stdout: captureStream(),
+        stderr: captureStream(),
+      }),
+      /cannot combine --clear-description with input data containing description/,
+    );
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test("pipelines revisions diff requires and sends an exact base revision", async () => {
+  const originalFetch = globalThis.fetch;
+  const output = captureStream();
+
+  globalThis.fetch = async (url, init) => {
+    assert.equal(
+      String(url),
+      "https://answerlayer.example/api/v1/api-pipelines/pipeline-1/revisions/revision-2/diff?against=revision-1",
+    );
+    assert.equal(init.method, "GET");
+    return new Response(JSON.stringify({ config_changes: [] }), {
+      status: 200,
+      headers: { "content-type": "application/json" },
+    });
+  };
+
+  try {
+    await main([
+      "pipelines", "revisions", "diff", "pipeline-1", "revision-2",
+      "--against", "revision-1",
+      "--base-url", "https://answerlayer.example",
+      "--api-key", "al_live_test",
+      "--json",
+    ], {
+      env: {},
+      stdin: readableStdin(),
+      stdout: output,
+      stderr: captureStream(),
+    });
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+
+  assert.deepEqual(JSON.parse(output.text()), { config_changes: [] });
+});
+
+test("pipelines revisions diff rejects a missing base revision without making a request", async () => {
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async () => assert.fail("API should not be called");
+
+  try {
+    await assert.rejects(
+      main([
+        "pipelines", "revisions", "diff", "pipeline-1", "revision-2",
+        "--base-url", "https://answerlayer.example",
+        "--api-key", "al_live_test",
+      ], {
+        env: {},
+        stdin: readableStdin(),
+        stdout: captureStream(),
+        stderr: captureStream(),
+      }),
+      /requires --against <revision-id>/,
+    );
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
 test("pipelines revisions push uploads the package and non-secret config", async () => {
   const originalFetch = globalThis.fetch;
   const output = captureStream();
@@ -2199,9 +2362,39 @@ test("pipeline lifecycle commands target exact revisions and runs", async () => 
   const originalFetch = globalThis.fetch;
   const cases = [
     {
+      argv: ["pipelines", "get", "pipeline-1"],
+      method: "GET",
+      pathname: "/api/v1/api-pipelines/pipeline-1",
+    },
+    {
+      argv: ["pipelines", "disable", "pipeline-1"],
+      method: "POST",
+      pathname: "/api/v1/api-pipelines/pipeline-1/disable",
+    },
+    {
+      argv: ["pipelines", "enable", "pipeline-1"],
+      method: "POST",
+      pathname: "/api/v1/api-pipelines/pipeline-1/enable",
+    },
+    {
+      argv: ["pipelines", "revisions", "list", "pipeline-1"],
+      method: "GET",
+      pathname: "/api/v1/api-pipelines/pipeline-1/revisions",
+    },
+    {
+      argv: ["pipelines", "revisions", "get", "pipeline-1", "revision-1"],
+      method: "GET",
+      pathname: "/api/v1/api-pipelines/pipeline-1/revisions/revision-1",
+    },
+    {
       argv: ["pipelines", "revisions", "promote", "pipeline-1", "revision-1"],
       method: "POST",
       pathname: "/api/v1/api-pipelines/pipeline-1/revisions/revision-1/promote",
+    },
+    {
+      argv: ["pipelines", "revisions", "rollback", "pipeline-1", "revision-1"],
+      method: "POST",
+      pathname: "/api/v1/api-pipelines/pipeline-1/revisions/revision-1/rollback",
     },
     {
       argv: ["pipelines", "runs", "get", "pipeline-1", "run-1"],
