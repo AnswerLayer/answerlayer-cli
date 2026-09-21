@@ -2311,6 +2311,157 @@ test("pipelines revisions validate waits for the exact run", async () => {
   assert.match(errorOutput.text(), /Waiting for pipeline run run-1/);
 });
 
+test("pipelines revisions connection-test waits for the exact revision run", async () => {
+  const originalFetch = globalThis.fetch;
+  const requests = [];
+
+  globalThis.fetch = async (url, init) => {
+    requests.push([init.method, new URL(String(url)).pathname]);
+    const status = requests.length === 1 ? "running" : "succeeded";
+    return new Response(JSON.stringify({ id: "run-test", status }), {
+      status: requests.length === 1 ? 202 : 200,
+      headers: { "content-type": "application/json" },
+    });
+  };
+
+  try {
+    await main([
+      "pipelines", "revisions", "connection-test", "pipeline-1", "revision-1",
+      "--wait", "--poll-interval", "0", "--base-url", "https://answerlayer.example",
+      "--api-key", "al_live_test", "--json",
+    ], {
+      env: {}, stdin: readableStdin(), stdout: captureStream(),
+      stderr: captureStream(), sleep: async () => {},
+    });
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+
+  assert.deepEqual(requests, [
+    ["POST", "/api/v1/api-pipelines/pipeline-1/revisions/revision-1/connection-test"],
+    ["GET", "/api/v1/api-pipelines/pipeline-1/runs/run-test"],
+  ]);
+});
+
+test("pipelines revisions probe sends all explicit safety limits", async () => {
+  const originalFetch = globalThis.fetch;
+  let received;
+
+  globalThis.fetch = async (url, init) => {
+    received = {
+      method: init.method,
+      path: new URL(String(url)).pathname,
+      body: JSON.parse(init.body),
+    };
+    return new Response(JSON.stringify({ id: "run-probe", status: "queued" }), {
+      status: 202,
+      headers: { "content-type": "application/json" },
+    });
+  };
+
+  try {
+    await main([
+      "pipelines", "revisions", "probe", "pipeline-1", "revision-1",
+      "--request-limit", "2", "--row-limit", "100", "--byte-limit", "4096",
+      "--runtime-limit", "60", "--base-url", "https://answerlayer.example",
+      "--api-key", "al_live_test", "--json",
+    ], {
+      env: {}, stdin: readableStdin(), stdout: captureStream(), stderr: captureStream(),
+    });
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+
+  assert.deepEqual(received, {
+    method: "POST",
+    path: "/api/v1/api-pipelines/pipeline-1/revisions/revision-1/probe",
+    body: {
+      request_limit: 2,
+      row_limit: 100,
+      byte_limit: 4096,
+      runtime_limit_seconds: 60,
+    },
+  });
+});
+
+test("pipelines revisions probe sends limits before waiting for the exact run", async () => {
+  const originalFetch = globalThis.fetch;
+  const requests = [];
+  const output = captureStream();
+
+  globalThis.fetch = async (url, init) => {
+    requests.push({
+      method: init.method,
+      path: new URL(String(url)).pathname,
+      body: init.body ? JSON.parse(init.body) : undefined,
+    });
+    const status = requests.length === 1 ? "running" : "succeeded";
+    return new Response(JSON.stringify({ id: "run-probe", status }), {
+      status: requests.length === 1 ? 202 : 200,
+      headers: { "content-type": "application/json" },
+    });
+  };
+
+  try {
+    await main([
+      "pipelines", "revisions", "probe", "pipeline-1", "revision-1",
+      "--request-limit", "2", "--row-limit", "100", "--byte-limit", "4096",
+      "--runtime-limit", "60", "--wait", "--poll-interval", "0",
+      "--base-url", "https://answerlayer.example", "--api-key", "al_live_test",
+      "--json",
+    ], {
+      env: {}, stdin: readableStdin(), stdout: output, stderr: captureStream(),
+      sleep: async () => {},
+    });
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+
+  assert.deepEqual(requests, [
+    {
+      method: "POST",
+      path: "/api/v1/api-pipelines/pipeline-1/revisions/revision-1/probe",
+      body: {
+        request_limit: 2,
+        row_limit: 100,
+        byte_limit: 4096,
+        runtime_limit_seconds: 60,
+      },
+    },
+    {
+      method: "GET",
+      path: "/api/v1/api-pipelines/pipeline-1/runs/run-probe",
+      body: undefined,
+    },
+  ]);
+  assert.equal(JSON.parse(output.text()).status, "succeeded");
+});
+
+test("pipelines revisions probe requires every safety limit before requesting", async () => {
+  const originalFetch = globalThis.fetch;
+  let requested = false;
+  globalThis.fetch = async () => {
+    requested = true;
+    throw new Error("unexpected request");
+  };
+
+  try {
+    await assert.rejects(
+      main([
+        "pipelines", "revisions", "probe", "pipeline-1", "revision-1",
+        "--request-limit", "2", "--row-limit", "100", "--runtime-limit", "60",
+        "--base-url", "https://answerlayer.example", "--api-key", "al_live_test",
+      ], {
+        env: {}, stdin: readableStdin(), stdout: captureStream(), stderr: captureStream(),
+      }),
+      /requires --byte-limit/,
+    );
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+  assert.equal(requested, false);
+});
+
 test("pipelines runs start returns failure evidence and a failing exit", async () => {
   const originalFetch = globalThis.fetch;
   const output = captureStream();
