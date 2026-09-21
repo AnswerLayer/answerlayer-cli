@@ -279,6 +279,10 @@ async function handlePipelines(client, command, positionals, parsed, io) {
     return handlePipelineRuns(client, base, positionals, parsed, io);
   }
 
+  if (command === "schedule" || command === "schedules") {
+    return handlePipelineSchedule(client, base, positionals, parsed, io);
+  }
+
   throw usage(`Unknown pipelines command: ${command}`);
 }
 
@@ -376,6 +380,10 @@ async function handlePipelineRuns(client, base, positionals, parsed, io) {
   const pipelinePath = `${base}/${encodeURIComponent(pipelineId)}`;
 
   if (action === "start" || action === "run") {
+    const body = await readData(parsed.flags, io, {
+      datasets: optionalCsvOrRepeated(parsed.flags.dataset),
+      idempotency_key: firstValue(parsed.flags.idempotencyKey),
+    });
     return requestWaitAndPrint(
       client,
       "POST",
@@ -383,6 +391,7 @@ async function handlePipelineRuns(client, base, positionals, parsed, io) {
       parsed,
       io,
       pipelinePath,
+      { body },
     );
   }
 
@@ -392,6 +401,9 @@ async function handlePipelineRuns(client, base, positionals, parsed, io) {
     return requestAndPrint(client, "GET", runPath, parsed, io);
   }
   if (action === "retry") {
+    const body = await readData(parsed.flags, io, {
+      idempotency_key: firstValue(parsed.flags.idempotencyKey),
+    });
     return requestWaitAndPrint(
       client,
       "POST",
@@ -399,6 +411,7 @@ async function handlePipelineRuns(client, base, positionals, parsed, io) {
       parsed,
       io,
       pipelinePath,
+      { body },
     );
   }
   if (action === "cancel") {
@@ -406,6 +419,47 @@ async function handlePipelineRuns(client, base, positionals, parsed, io) {
   }
 
   throw usage(`Unknown pipelines runs command: ${action}`);
+}
+
+async function handlePipelineSchedule(client, base, positionals, parsed, io) {
+  const action = requirePositional(positionals, 0, "pipeline schedule action");
+  const pipelineId = requirePositional(positionals, 1, "pipeline id");
+  const schedulePath = `${base}/${encodeURIComponent(pipelineId)}/schedule`;
+
+  if (action === "get") {
+    return requestAndPrint(client, "GET", schedulePath, parsed, io);
+  }
+  if (action === "set" || action === "create") {
+    const body = await readData(parsed.flags, io, {
+      schedule_expression: firstValue(parsed.flags.expression),
+      enabled: !parsed.flags.paused,
+    });
+    requirePayloadValue(
+      body,
+      "schedule_expression",
+      "pipelines schedule set requires --expression",
+    );
+    return requestAndPrint(client, "PUT", schedulePath, parsed, io, { body });
+  }
+  if (action === "update") {
+    const body = await readData(parsed.flags, io, {
+      schedule_expression: firstValue(parsed.flags.expression),
+    });
+    requirePayloadValue(
+      body,
+      "schedule_expression",
+      "pipelines schedule update requires --expression",
+    );
+    return requestAndPrint(client, "PATCH", schedulePath, parsed, io, { body });
+  }
+  if (action === "pause" || action === "resume") {
+    return requestAndPrint(client, "POST", `${schedulePath}/${action}`, parsed, io);
+  }
+  if (action === "delete" || action === "remove") {
+    return requestAndPrint(client, "DELETE", schedulePath, parsed, io);
+  }
+
+  throw usage(`Unknown pipelines schedule command: ${action}`);
 }
 
 async function handleConnections(client, command, positionals, parsed, io) {
@@ -1923,6 +1977,9 @@ function normalizeFlagName(rawName) {
     "--against": "against",
     "--package": "package",
     "--include-archived": "includeArchived",
+    "--dataset": "dataset",
+    "--idempotency-key": "idempotencyKey",
+    "--paused": "paused",
     "--wait": "wait",
     "--wait-timeout": "waitTimeout",
     "--poll-interval": "pollInterval",
@@ -2037,7 +2094,7 @@ function normalizeFlagName(rawName) {
 }
 
 function isBooleanFlag(rawName) {
-  return ["--json", "--help", "-h", "--include", "-i", "--raw", "--admin", "--force", "--follow", "--active", "--inactive", "--include-inactive", "--include-semantic-snapshot", "--include-archived", "--clear-description", "--use-semantic-layer", "--no-semantic-layer", "--no-demo", "--yes", "-y", "--wait"].includes(rawName);
+  return ["--json", "--help", "-h", "--include", "-i", "--raw", "--admin", "--force", "--follow", "--active", "--inactive", "--include-inactive", "--include-semantic-snapshot", "--include-archived", "--clear-description", "--use-semantic-layer", "--no-semantic-layer", "--no-demo", "--yes", "-y", "--wait", "--paused"].includes(rawName);
 }
 
 function setFlag(flags, name, value) {
@@ -2228,6 +2285,7 @@ Core:
   answerlayer pipelines list|create|get|update|enable|disable|archive
   answerlayer pipelines revisions list|get|push|validate|connection-test|probe|promote|diff|rollback <pipeline-id> [revision-id]
   answerlayer pipelines runs start|get|retry|cancel <pipeline-id> [run-id]
+  answerlayer pipelines schedule get|set|update|pause|resume|delete <pipeline-id>
   answerlayer connections supported|list|get|create|update|delete|schema|test
   answerlayer metadata structure|tables|columns|pii-summary|pii-settings|detect-pii
   answerlayer query run|validate|export <connection-id> --sql <sql>
@@ -2306,6 +2364,10 @@ Pipeline options:
   --row-limit <n>        Probe row ceiling (1-100000; required).
   --byte-limit <n>       Probe decoded-byte ceiling (1024-104857600; required).
   --runtime-limit <sec>  Probe runtime ceiling (1-900; required).
+  --dataset <name>       Limit a run to a dataset (repeat or comma-separate).
+  --idempotency-key <k>  Safely retry a run-creation request.
+  --expression <expr>    EventBridge rate(...) or cron(...) schedule.
+  --paused               Create a schedule in the paused state.
 
 SQL options:
   --sql, -q <sql>        SQL text.
