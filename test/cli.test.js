@@ -2586,6 +2586,16 @@ test("pipeline schedule commands use the install-local schedule API", async () =
       body: { schedule_expression: "rate(1 day)", enabled: false },
     },
     {
+      argv: ["set", "--expression", "rate(2 days)"],
+      method: "PUT",
+      body: { schedule_expression: "rate(2 days)", enabled: false },
+    },
+    {
+      argv: ["set", "--expression", "rate(3 days)", "--armed"],
+      method: "PUT",
+      body: { schedule_expression: "rate(3 days)", enabled: true },
+    },
+    {
       argv: ["update", "--expression", "cron(0 2 * * ? *)"],
       method: "PATCH",
       body: { schedule_expression: "cron(0 2 * * ? *)" },

@@ -430,9 +430,12 @@ async function handlePipelineSchedule(client, base, positionals, parsed, io) {
     return requestAndPrint(client, "GET", schedulePath, parsed, io);
   }
   if (action === "set" || action === "create") {
+    if (parsed.flags.armed && parsed.flags.paused) {
+      throw usage("pipelines schedule set accepts either --armed or --paused, not both");
+    }
     const body = await readData(parsed.flags, io, {
       schedule_expression: firstValue(parsed.flags.expression),
-      enabled: !parsed.flags.paused,
+      enabled: Boolean(parsed.flags.armed),
     });
     requirePayloadValue(
       body,
@@ -1979,6 +1982,7 @@ function normalizeFlagName(rawName) {
     "--include-archived": "includeArchived",
     "--dataset": "dataset",
     "--idempotency-key": "idempotencyKey",
+    "--armed": "armed",
     "--paused": "paused",
     "--wait": "wait",
     "--wait-timeout": "waitTimeout",
@@ -2094,7 +2098,7 @@ function normalizeFlagName(rawName) {
 }
 
 function isBooleanFlag(rawName) {
-  return ["--json", "--help", "-h", "--include", "-i", "--raw", "--admin", "--force", "--follow", "--active", "--inactive", "--include-inactive", "--include-semantic-snapshot", "--include-archived", "--clear-description", "--use-semantic-layer", "--no-semantic-layer", "--no-demo", "--yes", "-y", "--wait", "--paused"].includes(rawName);
+  return ["--json", "--help", "-h", "--include", "-i", "--raw", "--admin", "--force", "--follow", "--active", "--inactive", "--include-inactive", "--include-semantic-snapshot", "--include-archived", "--clear-description", "--use-semantic-layer", "--no-semantic-layer", "--no-demo", "--yes", "-y", "--wait", "--armed", "--paused"].includes(rawName);
 }
 
 function setFlag(flags, name, value) {
@@ -2367,7 +2371,8 @@ Pipeline options:
   --dataset <name>       Limit a run to a dataset (repeat or comma-separate).
   --idempotency-key <k>  Safely retry a run-creation request.
   --expression <expr>    EventBridge rate(...) or cron(...) schedule.
-  --paused               Create a schedule in the paused state.
+  --armed                Arm a new schedule immediately (default: unarmed).
+  --paused               Explicitly create a schedule in the unarmed state.
 
 SQL options:
   --sql, -q <sql>        SQL text.

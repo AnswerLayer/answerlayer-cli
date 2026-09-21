@@ -182,7 +182,8 @@ to see exact flags before using one:
 - `connections` — create / test / inspect schema
 - `pipelines` — create, inspect, update, validate, connection-test, probe,
   promote, run with explicit dataset scope and idempotency, retry from durable
-  checkpoints, manage install-local schedules, enable, disable, and archive;
+  checkpoints, define unarmed install-local schedules, explicitly arm or pause
+  schedules, enable, disable, and archive;
   upload immutable packages; list, inspect, diff, validate, promote, and roll
   back revisions; and run/retry/cancel exact revisions. Use `--wait --json` for
   automation. Never put credentials or CA material in package configuration;

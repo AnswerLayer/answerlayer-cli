@@ -166,12 +166,17 @@ Create and operate the pipeline's install-local EventBridge schedule:
 answerlayer pipelines schedule set <pipeline-id> \
   --expression 'cron(0 2 * * ? *)' --json
 answerlayer pipelines schedule get <pipeline-id> --json
+answerlayer pipelines schedule resume <pipeline-id> --json
 answerlayer pipelines schedule update <pipeline-id> \
   --expression 'rate(12 hours)' --json
 answerlayer pipelines schedule pause <pipeline-id> --json
-answerlayer pipelines schedule resume <pipeline-id> --json
 answerlayer pipelines schedule delete <pipeline-id>
 ```
+
+Creating a schedule only defines it; new schedules are unarmed by default.
+Run `schedule resume` after review, or pass `--armed` to `schedule set` when
+immediate activation is intentional. `--paused` remains an explicit spelling
+for creating the schedule unarmed.
 
 Scheduled tasks invoke the isolated extractor directly and continue when the
 AnswerLayer web process is unavailable. Disabling or archiving a pipeline also
