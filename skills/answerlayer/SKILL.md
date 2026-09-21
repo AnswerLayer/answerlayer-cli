@@ -180,7 +180,7 @@ to see exact flags before using one:
 - `dashboards`, `tiles` — build and read dashboards
 - `documents` — upload business-context docs and link them to connections
 - `connections` — create / test / inspect schema
-- `pipelines` — create, inspect, update, validate, connection-test, bounded-probe,
+- `pipelines` — create, inspect, update, validate, connection-test, probe,
   promote, enable, disable, and archive pipelines;
   upload immutable packages; list, inspect, diff, validate, promote, and roll
   back revisions; and run/retry/cancel exact revisions. Use `--wait --json` for
@@ -197,6 +197,9 @@ to see exact flags before using one:
 - **Read freely, but confirm before writes.** `create`, `update`, `delete`,
   `revoke`, `approve`, `deploy`, and `assign`/`unassign` change state — show the
   user what you're about to run and get a yes first.
+- Pipeline `connection-test` and `probe` commands access live customer systems
+  and data. Show the exact revision and probe limits and get confirmation before
+  running either command, even though they cannot publish production tables.
 - If a command fails with a `403` / missing-scope error, the API key lacks a
   scope (e.g. `inquiry:execute`, `query:execute`, `connection:read`). Tell the
   user which scope to add to their key.
