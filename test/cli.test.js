@@ -2509,6 +2509,158 @@ test("pipelines runs start returns failure evidence and a failing exit", async (
   });
 });
 
+test("pipelines runs start sends explicit dataset scope and idempotency", async () => {
+  const originalFetch = globalThis.fetch;
+  let body;
+  globalThis.fetch = async (url, init) => {
+    assert.equal(
+      String(url),
+      "https://answerlayer.example/api/v1/api-pipelines/pipeline-1/runs",
+    );
+    assert.equal(init.method, "POST");
+    body = JSON.parse(init.body);
+    return new Response(JSON.stringify({ id: "run-scoped", status: "queued" }), {
+      status: 202,
+      headers: { "content-type": "application/json" },
+    });
+  };
+
+  try {
+    await main([
+      "pipelines", "runs", "start", "pipeline-1",
+      "--dataset", "agep,agepxbplp", "--dataset", "income",
+      "--idempotency-key", "backfill-2021",
+      "--base-url", "https://answerlayer.example",
+      "--api-key", "al_live_test",
+    ], {
+      env: {}, stdin: readableStdin(), stdout: captureStream(), stderr: captureStream(),
+    });
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+
+  assert.deepEqual(body, {
+    datasets: ["agep", "agepxbplp", "income"],
+    idempotency_key: "backfill-2021",
+  });
+});
+
+test("pipelines runs retry sends a new idempotency key", async () => {
+  const originalFetch = globalThis.fetch;
+  let body;
+  globalThis.fetch = async (url, init) => {
+    assert.equal(
+      String(url),
+      "https://answerlayer.example/api/v1/api-pipelines/pipeline-1/runs/run-1/retry",
+    );
+    body = JSON.parse(init.body);
+    return new Response(JSON.stringify({ id: "run-2", status: "queued" }), {
+      status: 202,
+      headers: { "content-type": "application/json" },
+    });
+  };
+
+  try {
+    await main([
+      "pipelines", "runs", "retry", "pipeline-1", "run-1",
+      "--idempotency-key", "retry-1",
+      "--base-url", "https://answerlayer.example",
+      "--api-key", "al_live_test",
+    ], {
+      env: {}, stdin: readableStdin(), stdout: captureStream(), stderr: captureStream(),
+    });
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+
+  assert.deepEqual(body, { idempotency_key: "retry-1" });
+});
+
+test("pipeline schedule commands use the install-local schedule API", async () => {
+  const originalFetch = globalThis.fetch;
+  const cases = [
+    { argv: ["get"], method: "GET" },
+    {
+      argv: ["set", "--expression", "rate(1 day)", "--paused"],
+      method: "PUT",
+      body: { schedule_expression: "rate(1 day)", enabled: false },
+    },
+    {
+      argv: ["set", "--expression", "rate(2 days)"],
+      method: "PUT",
+      body: { schedule_expression: "rate(2 days)", enabled: false },
+    },
+    {
+      argv: ["set", "--expression", "rate(3 days)", "--armed"],
+      method: "PUT",
+      body: { schedule_expression: "rate(3 days)", enabled: true },
+    },
+    {
+      argv: ["update", "--expression", "cron(0 2 * * ? *)"],
+      method: "PATCH",
+      body: { schedule_expression: "cron(0 2 * * ? *)" },
+    },
+    { argv: ["pause"], method: "POST", suffix: "/pause" },
+    { argv: ["resume"], method: "POST", suffix: "/resume" },
+    { argv: ["delete"], method: "DELETE", status: 204 },
+  ];
+
+  try {
+    for (const testCase of cases) {
+      globalThis.fetch = async (url, init) => {
+        assert.equal(init.method, testCase.method);
+        assert.equal(
+          new URL(String(url)).pathname,
+          `/api/v1/api-pipelines/pipeline-1/schedule${testCase.suffix || ""}`,
+        );
+        if (testCase.body) assert.deepEqual(JSON.parse(init.body), testCase.body);
+        return new Response(
+          testCase.status === 204 ? null : JSON.stringify({ enabled: true }),
+          {
+            status: testCase.status || 200,
+            headers: testCase.status === 204
+              ? {}
+              : { "content-type": "application/json" },
+          },
+        );
+      };
+      await main([
+        "pipelines", "schedule", ...testCase.argv, "pipeline-1",
+        "--base-url", "https://answerlayer.example",
+        "--api-key", "al_live_test",
+      ], {
+        env: {}, stdin: readableStdin(), stdout: captureStream(), stderr: captureStream(),
+      });
+    }
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test("pipeline schedule set requires an expression before requesting", async () => {
+  const originalFetch = globalThis.fetch;
+  let requested = false;
+  globalThis.fetch = async () => {
+    requested = true;
+    return new Response();
+  };
+  try {
+    await assert.rejects(
+      main([
+        "pipelines", "schedule", "set", "pipeline-1",
+        "--base-url", "https://answerlayer.example",
+        "--api-key", "al_live_test",
+      ], {
+        env: {}, stdin: readableStdin(), stdout: captureStream(), stderr: captureStream(),
+      }),
+      /requires --expression/,
+    );
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+  assert.equal(requested, false);
+});
+
 test("pipeline lifecycle commands target exact revisions and runs", async () => {
   const originalFetch = globalThis.fetch;
   const cases = [

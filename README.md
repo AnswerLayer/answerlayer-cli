@@ -144,11 +144,43 @@ Run and operate the promoted revision:
 
 ```bash
 answerlayer pipelines runs start <pipeline-id> --wait --json
+answerlayer pipelines runs start <pipeline-id> \
+  --dataset agep --dataset agepxbplp \
+  --idempotency-key census-2021-backfill --wait --json
 answerlayer pipelines runs get <pipeline-id> <run-id> --json
-answerlayer pipelines runs retry <pipeline-id> <run-id> --wait --json
+answerlayer pipelines runs retry <pipeline-id> <run-id> \
+  --idempotency-key census-2021-retry-1 --wait --json
 answerlayer pipelines runs cancel <pipeline-id> <run-id> --json
 answerlayer pipelines archive <pipeline-id> --json
 ```
+
+Dataset scope is explicit and fail-closed: every requested dataset must be in
+the promoted package's resolved catalog. Retrying a publish run reuses the
+previous run's durable dataset checkpoint, so completed datasets are not
+republished. Reusing an idempotency key returns the original matching run
+instead of launching a duplicate.
+
+Create and operate the pipeline's install-local EventBridge schedule:
+
+```bash
+answerlayer pipelines schedule set <pipeline-id> \
+  --expression 'cron(0 2 * * ? *)' --json
+answerlayer pipelines schedule get <pipeline-id> --json
+answerlayer pipelines schedule resume <pipeline-id> --json
+answerlayer pipelines schedule update <pipeline-id> \
+  --expression 'rate(12 hours)' --json
+answerlayer pipelines schedule pause <pipeline-id> --json
+answerlayer pipelines schedule delete <pipeline-id>
+```
+
+Creating a schedule only defines it; new schedules are unarmed by default.
+Run `schedule resume` after review, or pass `--armed` to `schedule set` when
+immediate activation is intentional. `--paused` remains an explicit spelling
+for creating the schedule unarmed.
+
+Scheduled tasks invoke the isolated extractor directly and continue when the
+AnswerLayer web process is unavailable. Disabling or archiving a pipeline also
+stops its schedule from launching new work.
 
 Roll back by selecting a revision that was previously promoted. This moves the
 active pointer back to the existing immutable revision; it does not copy or
