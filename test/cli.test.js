@@ -1009,6 +1009,112 @@ test("inquiry models lists the deployment's available model catalog", async () =
   assert.match(output.text(), /GPT-5\.6 Terra/);
 });
 
+test("inquiry create-session resolves a policy name and exact version", async () => {
+  const originalFetch = globalThis.fetch;
+  const policyId = "11111111-1111-4111-8111-111111111111";
+  const revisionId = "22222222-2222-4222-8222-222222222222";
+  const requests = [];
+
+  globalThis.fetch = async (url, init) => {
+    const requestUrl = new URL(String(url));
+    requests.push({ path: requestUrl.pathname, method: init.method, body: init.body });
+    if (requestUrl.pathname === "/api/v1/inquiry-policies") {
+      return jsonResponse([{ id: policyId, name: "Finance standard" }]);
+    }
+    if (requestUrl.pathname === `/api/v1/inquiry-policies/${policyId}`) {
+      return jsonResponse({
+        id: policyId,
+        name: "Finance standard",
+        revisions: [{ id: revisionId, version: 2, status: "active" }],
+      });
+    }
+    if (requestUrl.pathname === "/api/v1/inquiry/sessions") {
+      assert.deepEqual(JSON.parse(init.body), {
+        connection_id: "connection-id",
+        policy_id: policyId,
+        policy_revision_id: revisionId,
+      });
+      return jsonResponse({ session_id: "session-id" }, 201);
+    }
+    return jsonResponse({ detail: "unexpected request" }, 500);
+  };
+
+  try {
+    await main([
+      "inquiry", "create-session",
+      "--connection", "connection-id",
+      "--policy", "Finance standard",
+      "--policy-version", "2",
+      "--base-url", "https://answerlayer.example",
+      "--api-key", "al_test",
+      "--json",
+    ], {
+      env: {},
+      stdin: readableStdin(),
+      stdout: captureStream(),
+      stderr: captureStream(),
+    });
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+
+  assert.deepEqual(requests.map(({ path, method }) => [method, path]), [
+    ["GET", "/api/v1/inquiry-policies"],
+    ["GET", `/api/v1/inquiry-policies/${policyId}`],
+    ["POST", "/api/v1/inquiry/sessions"],
+  ]);
+});
+
+test("inquiry-policies create maps typed policy flags", async () => {
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async (url, init) => {
+    assert.equal(new URL(String(url)).pathname, "/api/v1/inquiry-policies");
+    assert.equal(init.method, "POST");
+    assert.deepEqual(JSON.parse(init.body), {
+      name: "Board answers",
+      description: "Concise board-ready answers",
+      config: {
+        output_format: "table_first",
+        numeric_precision: { mode: "significant_figures", value: 4 },
+        insufficient_data_behavior: "explain_and_stop",
+        proxy_behavior: "forbid_unconfirmed",
+        evidence: {
+          require_identifiers: true,
+          require_numeric_support: false,
+        },
+      },
+      administrator_guidance: "Lead with the decision-relevant result.",
+    });
+    return jsonResponse({ id: "policy-id", name: "Board answers" }, 201);
+  };
+
+  try {
+    await main([
+      "inquiry-policies", "create",
+      "--name", "Board answers",
+      "--description", "Concise board-ready answers",
+      "--output-format", "table_first",
+      "--precision-mode", "significant_figures",
+      "--precision-value", "4",
+      "--insufficient-data", "explain_and_stop",
+      "--proxy-behavior", "forbid_unconfirmed",
+      "--require-identifiers",
+      "--no-require-numeric-support",
+      "--guidance", "Lead with the decision-relevant result.",
+      "--base-url", "https://answerlayer.example",
+      "--api-key", "al_test",
+      "--json",
+    ], {
+      env: {},
+      stdin: readableStdin(),
+      stdout: captureStream(),
+      stderr: captureStream(),
+    });
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
 test("evals suites create maps common flags to the evaluation API", async () => {
   const originalFetch = globalThis.fetch;
   const output = captureStream();
@@ -2959,6 +3065,13 @@ function countDemoCreateRequests(requests) {
       return [resource, requests.filter(request => request.method === "POST" && request.pathname === pathName).length];
     }),
   );
+}
+
+function jsonResponse(data, status = 200) {
+  return new Response(JSON.stringify(data), {
+    status,
+    headers: { "content-type": "application/json" },
+  });
 }
 
 function captureStream() {
