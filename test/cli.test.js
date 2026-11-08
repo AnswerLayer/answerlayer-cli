@@ -786,31 +786,18 @@ test("local init rejects unsupported Docker versions and low disk space", async 
   await assert.rejects(main(["local", "init"], lowDisk.io), /at least 2 GB/);
 });
 
-test("defaults the base URL to the hosted SaaS when none is configured", async () => {
-  const originalFetch = globalThis.fetch;
-  const output = captureStream();
+test("requires an explicit base URL when none is configured", async () => {
   const configPath = path.join(fs.mkdtempSync(path.join(os.tmpdir(), "al-cli-empty-config-")), "config.json");
 
-  globalThis.fetch = async (url) => {
-    assert.equal(String(url), "https://app.answerlayer.io/api/v1/auth/me");
-    return new Response(JSON.stringify({ email: "user@example.com" }), {
-      status: 200,
-      headers: { "content-type": "application/json" },
-    });
-  };
-
-  try {
-    await main(["auth", "me", "--api-key", "al_live_test"], {
+  await assert.rejects(
+    main(["auth", "me", "--api-key", "al_live_test"], {
       env: { ANSWERLAYER_CONFIG: configPath },
       stdin: readableStdin(),
-      stdout: output,
+      stdout: captureStream(),
       stderr: captureStream(),
-    });
-  } finally {
-    globalThis.fetch = originalFetch;
-  }
-
-  assert.deepEqual(JSON.parse(output.text()), { email: "user@example.com" });
+    }),
+    /Missing API base URL/,
+  );
 });
 
 test("query run calls the AnswerLayer API with X-API-Key", async () => {

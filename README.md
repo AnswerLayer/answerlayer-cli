@@ -60,15 +60,12 @@ initialize the CLI. `init` verifies the key before it writes the config file, so
 an invalid or expired key never overwrites a working local setup:
 
 ```bash
-answerlayer init --api-key al_live_...
+answerlayer init --base-url https://answerlayer.your-company.com --api-key al_live_...
 ```
 
-The CLI talks to the hosted SaaS at `https://app.answerlayer.io` by default. For a
-BYOC or self-hosted install, point it at your own URL:
-
-```bash
-answerlayer init --api-key al_live_... --base-url https://answerlayer.your-company.com
-```
+The CLI has no hosted network default. Pass the URL for your local, BYOC, or
+self-hosted install explicitly; after initialization it is saved in the local
+configuration file.
 
 The first API key is currently created in the AnswerLayer app under **Settings →
 API Keys**. A browser/device login flow is planned; until then, the CLI will tell
@@ -78,7 +75,7 @@ You can also skip the config file and use environment variables:
 
 ```bash
 export ANSWERLAYER_API_KEY=al_live_...
-export ANSWERLAYER_BASE_URL=https://answerlayer.your-company.com  # optional override
+export ANSWERLAYER_BASE_URL=https://answerlayer.your-company.com
 ```
 
 The CLI sends API keys using the `X-API-Key` header.
