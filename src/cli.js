@@ -990,16 +990,20 @@ function policyContentPayload(flags, { includeMetadata = false } = {}) {
       ? true
       : (flags.noRequireNumericSupport ? false : undefined),
   });
+  const outputFormat = enumFlag(flags.outputFormat, "output-format", [
+    "concise", "narrative", "table_first",
+  ]);
+  const insufficientDataBehavior = enumFlag(flags.insufficientData, "insufficient-data", [
+    "explain_and_stop", "ask_for_clarification", "conditional_proxy",
+  ]);
+  const proxyBehavior = enumFlag(flags.proxyBehavior, "proxy-behavior", [
+    "forbid_unconfirmed", "require_confirmation", "allow_with_prominent_qualification",
+  ]);
   const config = dropUndefined({
-    output_format: firstValue(flags.outputFormat),
-    numeric_precision: firstValue(flags.precisionMode)
-      ? dropUndefined({
-        mode: firstValue(flags.precisionMode),
-        value: parseInteger(firstValue(flags.precisionValue), undefined),
-      })
-      : undefined,
-    insufficient_data_behavior: firstValue(flags.insufficientData),
-    proxy_behavior: firstValue(flags.proxyBehavior),
+    output_format: outputFormat,
+    numeric_precision: policyNumericPrecision(flags),
+    insufficient_data_behavior: insufficientDataBehavior,
+    proxy_behavior: proxyBehavior,
     evidence: Object.keys(evidence).length ? evidence : undefined,
   });
   return dropUndefined({
@@ -1010,6 +1014,29 @@ function policyContentPayload(flags, { includeMetadata = false } = {}) {
     config: Object.keys(config).length ? config : undefined,
     administrator_guidance: firstValue(flags.guidance),
   });
+}
+
+function policyNumericPrecision(flags) {
+  const mode = enumFlag(flags.precisionMode, "precision-mode", [
+    "preserve_source", "minimum_decimal_places", "significant_figures",
+  ]);
+  const rawValue = firstValue(flags.precisionValue);
+  if (!mode) {
+    if (rawValue !== undefined) throw usage("--precision-value requires --precision-mode");
+    return undefined;
+  }
+  if (mode === "preserve_source") {
+    if (rawValue !== undefined) throw usage("--precision-mode preserve_source does not accept --precision-value");
+    return { mode };
+  }
+  if (rawValue === undefined || rawValue === "") {
+    throw usage(`--precision-mode ${mode} requires --precision-value`);
+  }
+  const [minimum, maximum] = mode === "minimum_decimal_places" ? [0, 10] : [1, 15];
+  return {
+    mode,
+    value: parseBoundedInteger(rawValue, "precision-value", minimum, maximum),
+  };
 }
 
 async function resolvePolicySelection(client, flags) {
@@ -1032,10 +1059,7 @@ async function resolvePolicySelection(client, flags) {
   if (isUuid(versionReference)) {
     return { policy_id: policyId, policy_revision_id: versionReference };
   }
-  const version = Number.parseInt(versionReference, 10);
-  if (!Number.isInteger(version) || version < 1) {
-    throw usage("--policy-version must be a positive version number or revision UUID");
-  }
+  const version = parsePositiveInteger(versionReference, "policy-version");
   const policy = await client.request("GET", `/api/v1/inquiry-policies/${encodeURIComponent(policyId)}`);
   const revision = policy.revisions.find((item) => item.version === version);
   if (!revision) throw usage(`Policy ${reference} has no version ${version}`);
@@ -2352,6 +2376,23 @@ function parseBoundedInteger(value, name, minimum, maximum) {
   return parsed;
 }
 
+function parsePositiveInteger(value, name) {
+  const parsed = Number(value);
+  if (!Number.isSafeInteger(parsed) || parsed < 1) {
+    throw usage(`--${name} must be a positive integer or revision UUID`);
+  }
+  return parsed;
+}
+
+function enumFlag(value, name, allowed) {
+  const selected = firstValue(value);
+  if (selected === undefined || selected === "") return undefined;
+  if (!allowed.includes(selected)) {
+    throw usage(`--${name} must be one of: ${allowed.join(", ")}`);
+  }
+  return selected;
+}
+
 function requiredBoundedFlag(value, name, minimum, maximum) {
   const first = firstValue(value);
   if (first === undefined || first === "") {
@@ -2490,8 +2531,27 @@ Data products:
   answerlayer saved-queries list|get|create|update|delete|approve|unapprove|execute
   answerlayer semantic <entities|relationships|measures|metrics|dimensions|filters> list|get|create|update|delete|delete-all|generate
   answerlayer inquiry models|ask|sessions|create-session|session|update-session|delete-session|turn
-  answerlayer inquiry-policies list|get|create|revise|activate|archive|preview|effective
-  answerlayer inquiry-policies set-default|clear-default organization|connection
+  answerlayer inquiry-policies list [--include-archived]
+  answerlayer inquiry-policies get <policy-id-or-name>
+  answerlayer inquiry-policies create --name <name> [policy options]
+  answerlayer inquiry-policies revise <policy-id-or-name> [policy options]
+  answerlayer inquiry-policies preview [policy options]
+  answerlayer inquiry-policies activate <policy-id-or-name> <revision-id-or-version>
+  answerlayer inquiry-policies archive <policy-id-or-name>
+  answerlayer inquiry-policies effective --connection <connection-id>
+  answerlayer inquiry-policies set-default organization <policy-id-or-name>
+  answerlayer inquiry-policies set-default connection <connection-id> <policy-id-or-name>
+  answerlayer inquiry-policies clear-default organization
+  answerlayer inquiry-policies clear-default connection <connection-id>
+  Policy options:
+    --description <text> --guidance <text>
+    --output-format <concise|narrative|table_first>
+    --precision-mode <preserve_source|minimum_decimal_places|significant_figures>
+    --precision-value <0-10 decimal places|1-15 significant figures>
+    --require-identifiers|--no-require-identifiers
+    --require-numeric-support|--no-require-numeric-support
+    --insufficient-data <explain_and_stop|ask_for_clarification|conditional_proxy>
+    --proxy-behavior <forbid_unconfirmed|require_confirmation|allow_with_prominent_qualification>
   answerlayer evals suites list|create|get|update|delete
   answerlayer evals cases create|update|delete
   answerlayer evals runs list|create|create-batch|get|update|cancel|compare|analyze
