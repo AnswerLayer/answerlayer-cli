@@ -4,8 +4,8 @@
   "description": "Open-source command line client for the AnswerLayer API.",
   "type": "module",
   "bin": {
-    "answerlayer": "./bin/answerlayer.js",
-    "al": "./bin/answerlayer.js"
+    "answerlayer": "bin/answerlayer.js",
+    "al": "bin/answerlayer.js"
   },
   "files": [
     "bin",
