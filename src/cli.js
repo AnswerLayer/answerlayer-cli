@@ -55,6 +55,7 @@ export async function main(argv, io) {
   if (group === "query-results" || group === "results") return handleQueryResults(client, command, positionals, parsed, io);
   if (group === "saved-queries" || group === "saved") return handleSavedQueries(client, command, positionals, parsed, io);
   if (group === "semantic") return handleSemantic(client, command, positionals, parsed, io);
+  if (group === "inquiry-policies" || group === "policies") return handleInquiryPolicies(client, command, positionals, parsed, io);
   if (group === "inquiry") return handleInquiry(client, command, positionals, parsed, io);
   if (group === "evals" || group === "evaluations") return handleEvals(client, command, positionals, parsed, io);
   if (group === "optimize" || group === "optimization" || group === "semantic-optimization") {
@@ -794,8 +795,13 @@ async function handleInquiry(client, command, positionals, parsed, io) {
     let sessionId = firstValue(parsed.flags.session);
     if (!sessionId) {
       if (!connectionId) throw usage("inquiry ask requires --connection when --session is not provided");
+      const policy = await resolvePolicySelection(client, parsed.flags);
       const session = await client.request("POST", "/api/v1/inquiry/sessions", {
-        body: { connection_id: connectionId, model: firstValue(parsed.flags.model) },
+        body: {
+          connection_id: connectionId,
+          model: firstValue(parsed.flags.model),
+          ...policy,
+        },
       });
       sessionId = session.session_id;
     }
@@ -833,10 +839,12 @@ async function handleInquiry(client, command, positionals, parsed, io) {
   }
 
   if (command === "create-session") {
+    const policy = await resolvePolicySelection(client, parsed.flags);
     return requestAndPrint(client, "POST", "/api/v1/inquiry/sessions", parsed, io, {
       body: await readData(parsed.flags, io, {
         connection_id: firstValue(parsed.flags.connection),
         model: firstValue(parsed.flags.model),
+        ...policy,
       }),
     });
   }
@@ -868,6 +876,198 @@ async function handleInquiry(client, command, positionals, parsed, io) {
   }
 
   throw usage(`Unknown inquiry command: ${command}`);
+}
+
+async function handleInquiryPolicies(client, command, positionals, parsed, io) {
+  const base = "/api/v1/inquiry-policies";
+  if (command === "list" || !command) {
+    return requestAndPrint(client, "GET", base, parsed, io, {
+      query: { include_archived: parsed.flags.includeArchived || undefined },
+      table: [
+        { key: "id", label: "ID" },
+        { key: "name", label: "Name" },
+        { key: "status", label: "Status" },
+        { key: "active_version", label: "Version" },
+        { key: "active_content_sha256", label: "Content hash" },
+      ],
+    });
+  }
+
+  if (["create", "preview"].includes(command)) {
+    const payload = await readData(parsed.flags, io, policyContentPayload(parsed.flags, {
+      includeMetadata: command === "create",
+    }));
+    if (command === "create") {
+      requirePayloadValue(payload, "name", "inquiry-policies create requires --name");
+    }
+    return requestAndPrint(client, "POST", command === "preview" ? `${base}/preview` : base, parsed, io, {
+      body: payload,
+    });
+  }
+
+  if (command === "effective") {
+    const connectionId = firstValue(parsed.flags.connection) || positionals[0];
+    if (!connectionId) throw usage("inquiry-policies effective requires --connection");
+    return requestAndPrint(client, "GET", `${base}/defaults/effective`, parsed, io, {
+      query: { connection_id: connectionId },
+    });
+  }
+
+  if (command === "set-default") {
+    const scope = positionals[0];
+    const policyRef = positionals[scope === "connection" ? 2 : 1] || firstValue(parsed.flags.policy);
+    if (!policyRef) throw usage("inquiry-policies set-default requires a policy id or name");
+    const { policy_id } = await resolvePolicySelection(client, { policy: policyRef });
+    if (scope === "organization" || scope === "org") {
+      return requestAndPrint(client, "PUT", `${base}/defaults/organization`, parsed, io, {
+        body: { policy_id },
+      });
+    }
+    if (scope === "connection") {
+      const connectionId = positionals[1] || firstValue(parsed.flags.connection);
+      if (!connectionId) throw usage("connection default requires a connection id");
+      return requestAndPrint(client, "PUT", `${base}/defaults/connections/${encodeURIComponent(connectionId)}`, parsed, io, {
+        body: { policy_id },
+      });
+    }
+    throw usage("Expected inquiry-policies set-default organization|connection");
+  }
+
+  if (command === "clear-default") {
+    const scope = positionals[0];
+    if (scope === "organization" || scope === "org") {
+      return requestAndPrint(client, "DELETE", `${base}/defaults/organization`, parsed, io);
+    }
+    if (scope === "connection") {
+      const connectionId = positionals[1] || firstValue(parsed.flags.connection);
+      if (!connectionId) throw usage("connection default requires a connection id");
+      return requestAndPrint(client, "DELETE", `${base}/defaults/connections/${encodeURIComponent(connectionId)}`, parsed, io);
+    }
+    throw usage("Expected inquiry-policies clear-default organization|connection");
+  }
+
+  const policyRef = positionals[0] || firstValue(parsed.flags.policy);
+  if (!policyRef) throw usage(`inquiry-policies ${command} requires a policy id or name`);
+  const { policy_id: policyId } = await resolvePolicySelection(client, { policy: policyRef });
+  if (command === "get") {
+    return requestAndPrint(client, "GET", `${base}/${encodeURIComponent(policyId)}`, parsed, io);
+  }
+  if (command === "revise") {
+    return requestAndPrint(client, "POST", `${base}/${encodeURIComponent(policyId)}/revisions`, parsed, io, {
+      body: await readData(parsed.flags, io, {
+        ...policyContentPayload(parsed.flags),
+        base_revision_id: firstValue(parsed.flags.baseRevision),
+      }),
+    });
+  }
+  if (command === "activate") {
+    const revisionRef = positionals[1] || firstValue(parsed.flags.policyVersion);
+    if (!revisionRef) throw usage("inquiry-policies activate requires a revision id or version");
+    const { policy_revision_id: revisionId } = await resolvePolicySelection(client, {
+      policy: policyId,
+      policyVersion: revisionRef,
+    });
+    return requestAndPrint(client, "POST", `${base}/${encodeURIComponent(policyId)}/revisions/${encodeURIComponent(revisionId)}/activate`, parsed, io);
+  }
+  if (command === "archive" || command === "delete") {
+    return requestAndPrint(client, "POST", `${base}/${encodeURIComponent(policyId)}/archive`, parsed, io);
+  }
+  throw usage(`Unknown inquiry-policies command: ${command}`);
+}
+
+function policyContentPayload(flags, { includeMetadata = false } = {}) {
+  if (flags.requireIdentifiers && flags.noRequireIdentifiers) {
+    throw usage("Use only one of --require-identifiers or --no-require-identifiers");
+  }
+  if (flags.requireNumericSupport && flags.noRequireNumericSupport) {
+    throw usage("Use only one of --require-numeric-support or --no-require-numeric-support");
+  }
+  const evidence = dropUndefined({
+    require_identifiers: flags.requireIdentifiers
+      ? true
+      : (flags.noRequireIdentifiers ? false : undefined),
+    require_numeric_support: flags.requireNumericSupport
+      ? true
+      : (flags.noRequireNumericSupport ? false : undefined),
+  });
+  const outputFormat = enumFlag(flags.outputFormat, "output-format", [
+    "concise", "narrative", "table_first",
+  ]);
+  const insufficientDataBehavior = enumFlag(flags.insufficientData, "insufficient-data", [
+    "explain_and_stop", "ask_for_clarification", "conditional_proxy",
+  ]);
+  const proxyBehavior = enumFlag(flags.proxyBehavior, "proxy-behavior", [
+    "forbid_unconfirmed", "require_confirmation", "allow_with_prominent_qualification",
+  ]);
+  const config = dropUndefined({
+    output_format: outputFormat,
+    numeric_precision: policyNumericPrecision(flags),
+    insufficient_data_behavior: insufficientDataBehavior,
+    proxy_behavior: proxyBehavior,
+    evidence: Object.keys(evidence).length ? evidence : undefined,
+  });
+  return dropUndefined({
+    ...(includeMetadata ? {
+      name: firstValue(flags.name),
+      description: firstValue(flags.description),
+    } : {}),
+    config: Object.keys(config).length ? config : undefined,
+    administrator_guidance: firstValue(flags.guidance),
+  });
+}
+
+function policyNumericPrecision(flags) {
+  const mode = enumFlag(flags.precisionMode, "precision-mode", [
+    "preserve_source", "minimum_decimal_places", "significant_figures",
+  ]);
+  const rawValue = firstValue(flags.precisionValue);
+  if (!mode) {
+    if (rawValue !== undefined) throw usage("--precision-value requires --precision-mode");
+    return undefined;
+  }
+  if (mode === "preserve_source") {
+    if (rawValue !== undefined) throw usage("--precision-mode preserve_source does not accept --precision-value");
+    return { mode };
+  }
+  if (rawValue === undefined || rawValue === "") {
+    throw usage(`--precision-mode ${mode} requires --precision-value`);
+  }
+  const [minimum, maximum] = mode === "minimum_decimal_places" ? [0, 10] : [1, 15];
+  return {
+    mode,
+    value: parseBoundedInteger(rawValue, "precision-value", minimum, maximum),
+  };
+}
+
+async function resolvePolicySelection(client, flags) {
+  const reference = firstValue(flags.policy);
+  const versionReference = firstValue(flags.policyVersion);
+  if (!reference) {
+    if (versionReference) throw usage("--policy-version requires --policy");
+    return {};
+  }
+  let policyId = reference;
+  if (!isUuid(reference)) {
+    const policies = await client.request("GET", "/api/v1/inquiry-policies");
+    const matches = policies.filter((policy) => policy.name.toLowerCase() === reference.toLowerCase());
+    if (matches.length !== 1) {
+      throw usage(matches.length ? `Policy name is ambiguous: ${reference}` : `Policy not found: ${reference}`);
+    }
+    policyId = matches[0].id;
+  }
+  if (!versionReference) return { policy_id: policyId };
+  if (isUuid(versionReference)) {
+    return { policy_id: policyId, policy_revision_id: versionReference };
+  }
+  const version = parsePositiveInteger(versionReference, "policy-version");
+  const policy = await client.request("GET", `/api/v1/inquiry-policies/${encodeURIComponent(policyId)}`);
+  const revision = policy.revisions.find((item) => item.version === version);
+  if (!revision) throw usage(`Policy ${reference} has no version ${version}`);
+  return { policy_id: policyId, policy_revision_id: revision.id };
+}
+
+function isUuid(value) {
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value);
 }
 
 async function handleEvals(client, resource, positionals, parsed, io) {
@@ -964,6 +1164,7 @@ async function handleEvals(client, resource, positionals, parsed, io) {
         case_ids: optionalCsvOrRepeated(parsed.flags.case),
         categories: optionalDistinctRepeated(parsed.flags.category),
         case_concurrency: firstValue(parsed.flags.concurrency),
+        ...await resolvePolicySelection(client, parsed.flags),
       });
       requirePayloadValue(payload, "suite_id", "evals runs create requires a suite id or --suite");
       normalizeEvalCaseConcurrency(payload);
@@ -981,6 +1182,7 @@ async function handleEvals(client, resource, positionals, parsed, io) {
         model: firstValue(parsed.flags.model),
         use_semantic_layer: semanticLayerMode(parsed.flags),
         case_concurrency: firstValue(parsed.flags.concurrency),
+        ...await resolvePolicySelection(client, parsed.flags),
       });
       requireEvalBatchSuites(payload.suite_ids);
       normalizeEvalCaseConcurrency(payload);
@@ -2026,6 +2228,19 @@ function normalizeFlagName(rawName) {
     "--h": "h",
     "--prompt": "prompt",
     "--model": "model",
+    "--policy": "policy",
+    "--policy-version": "policyVersion",
+    "--base-revision": "baseRevision",
+    "--guidance": "guidance",
+    "--output-format": "outputFormat",
+    "--precision-mode": "precisionMode",
+    "--precision-value": "precisionValue",
+    "--insufficient-data": "insufficientData",
+    "--proxy-behavior": "proxyBehavior",
+    "--require-identifiers": "requireIdentifiers",
+    "--no-require-identifiers": "noRequireIdentifiers",
+    "--require-numeric-support": "requireNumericSupport",
+    "--no-require-numeric-support": "noRequireNumericSupport",
     "--mode": "mode",
     "--reason": "reason",
     "--component": "component",
@@ -2098,7 +2313,7 @@ function normalizeFlagName(rawName) {
 }
 
 function isBooleanFlag(rawName) {
-  return ["--json", "--help", "-h", "--include", "-i", "--raw", "--admin", "--force", "--follow", "--active", "--inactive", "--include-inactive", "--include-semantic-snapshot", "--include-archived", "--clear-description", "--use-semantic-layer", "--no-semantic-layer", "--no-demo", "--yes", "-y", "--wait", "--armed", "--paused"].includes(rawName);
+  return ["--json", "--help", "-h", "--include", "-i", "--raw", "--admin", "--force", "--follow", "--active", "--inactive", "--include-inactive", "--include-semantic-snapshot", "--include-archived", "--clear-description", "--use-semantic-layer", "--no-semantic-layer", "--require-identifiers", "--no-require-identifiers", "--require-numeric-support", "--no-require-numeric-support", "--no-demo", "--yes", "-y", "--wait", "--armed", "--paused"].includes(rawName);
 }
 
 function setFlag(flags, name, value) {
@@ -2159,6 +2374,23 @@ function parseBoundedInteger(value, name, minimum, maximum) {
     throw usage(`Expected --${name} to be an integer from ${minimum} to ${maximum}`);
   }
   return parsed;
+}
+
+function parsePositiveInteger(value, name) {
+  const parsed = Number(value);
+  if (!Number.isSafeInteger(parsed) || parsed < 1) {
+    throw usage(`--${name} must be a positive integer or revision UUID`);
+  }
+  return parsed;
+}
+
+function enumFlag(value, name, allowed) {
+  const selected = firstValue(value);
+  if (selected === undefined || selected === "") return undefined;
+  if (!allowed.includes(selected)) {
+    throw usage(`--${name} must be one of: ${allowed.join(", ")}`);
+  }
+  return selected;
 }
 
 function requiredBoundedFlag(value, name, minimum, maximum) {
@@ -2299,6 +2531,27 @@ Data products:
   answerlayer saved-queries list|get|create|update|delete|approve|unapprove|execute
   answerlayer semantic <entities|relationships|measures|metrics|dimensions|filters> list|get|create|update|delete|delete-all|generate
   answerlayer inquiry models|ask|sessions|create-session|session|update-session|delete-session|turn
+  answerlayer inquiry-policies list [--include-archived]
+  answerlayer inquiry-policies get <policy-id-or-name>
+  answerlayer inquiry-policies create --name <name> [policy options]
+  answerlayer inquiry-policies revise <policy-id-or-name> [policy options]
+  answerlayer inquiry-policies preview [policy options]
+  answerlayer inquiry-policies activate <policy-id-or-name> <revision-id-or-version>
+  answerlayer inquiry-policies archive <policy-id-or-name>
+  answerlayer inquiry-policies effective --connection <connection-id>
+  answerlayer inquiry-policies set-default organization <policy-id-or-name>
+  answerlayer inquiry-policies set-default connection <connection-id> <policy-id-or-name>
+  answerlayer inquiry-policies clear-default organization
+  answerlayer inquiry-policies clear-default connection <connection-id>
+  Policy options:
+    --description <text> --guidance <text>
+    --output-format <concise|narrative|table_first>
+    --precision-mode <preserve_source|minimum_decimal_places|significant_figures>
+    --precision-value <0-10 decimal places|1-15 significant figures>
+    --require-identifiers|--no-require-identifiers
+    --require-numeric-support|--no-require-numeric-support
+    --insufficient-data <explain_and_stop|ask_for_clarification|conditional_proxy>
+    --proxy-behavior <forbid_unconfirmed|require_confirmation|allow_with_prominent_qualification>
   answerlayer evals suites list|create|get|update|delete
   answerlayer evals cases create|update|delete
   answerlayer evals runs list|create|create-batch|get|update|cancel|compare|analyze
@@ -2310,6 +2563,8 @@ Data products:
     --category <name> (repeat; category and case selectors are unioned),
     --concurrency <1-8> (default 3; 1 is serial), and
     --use-semantic-layer or --no-semantic-layer
+    inquiry and eval run creation accept --policy <id-or-name> and
+    --policy-version <number-or-revision-id>
     create-batch accepts 2 to 20 suite ids as positionals or repeatable
     --suite values, plus shared --label, --model, --concurrency <1-8>,
     and --use-semantic-layer or --no-semantic-layer

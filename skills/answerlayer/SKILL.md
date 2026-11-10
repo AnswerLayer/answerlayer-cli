@@ -1,6 +1,6 @@
 ---
 name: answerlayer
-description: Query databases and operate customer-owned API pipelines with AnswerLayer. Use when the user wants to set up or configure AnswerLayer, connect to their data, ask analytical or business questions about a database, run SQL, or manage AnswerLayer API pipelines, connections, saved queries, the semantic layer, or dashboards.
+description: Query databases and operate customer-owned API pipelines with AnswerLayer. Use when the user wants to set up or configure AnswerLayer, connect to their data, ask analytical or business questions about a database, run SQL, or manage AnswerLayer response policies, API pipelines, connections, saved queries, the semantic layer, or dashboards.
 ---
 
 # AnswerLayer
@@ -167,6 +167,34 @@ AL query run <connection-id> --file ./report.sql --format csv
 AL query validate <connection-id> --sql "select * from orders"
 ```
 
+### Manage inquiry response policies
+
+Use `AL inquiry-policies list|get|effective --json` to inspect policies and the
+default resolved for a connection. Policy mutations require the user's
+confirmation. Preview configuration before creating or revising it:
+
+```bash
+AL inquiry-policies preview \
+  --output-format table_first \
+  --precision-mode significant_figures --precision-value 4 \
+  --require-identifiers --require-numeric-support \
+  --insufficient-data ask_for_clarification \
+  --proxy-behavior require_confirmation \
+  --guidance "Lead with the result." --json
+```
+
+After confirmation, use `create --name <name>` or `revise <policy>`, then
+activate the returned revision explicitly with
+`activate <policy> <revision-id-or-version>`. Set defaults with
+`set-default organization <policy>` or
+`set-default connection <connection-id> <policy>`.
+
+New inquiries and eval runs inherit connection, organization, then platform
+defaults. Use `--policy <id-or-name> --policy-version <number-or-revision-id>`
+to pin an exact revision. Existing sessions and runs remain pinned when a later
+revision is activated. Run `AL --help` for all allowed configuration values and
+precision ranges.
+
 ### Other resources
 
 These follow `AL <group> <command>`. Run `AL <group> --help` (or `AL --help`)
@@ -179,6 +207,8 @@ to see exact flags before using one:
 - `generation` — generate semantic components, optionally grounded by an eval suite's authoring cases; holdout and adversarial cases are rejected
 - `dashboards`, `tiles` — build and read dashboards
 - `documents` — upload business-context docs and link them to connections
+- `inquiry-policies` — preview, create, revise, activate, archive, and assign
+  versioned answer-formatting and uncertainty-handling policies
 - `connections` — create / test / inspect schema
 - `pipelines` — create, inspect, update, validate, connection-test, probe,
   promote, run with explicit dataset scope and idempotency, retry from durable

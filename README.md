@@ -83,6 +83,86 @@ export ANSWERLAYER_BASE_URL=https://answerlayer.your-company.com  # optional ove
 
 The CLI sends API keys using the `X-API-Key` header.
 
+## Configure inquiry response policies
+
+Response policies control answer presentation and uncertainty handling without
+changing data access, semantic definitions, or citation integrity. Policies are
+versioned: creating or revising a policy produces a draft, and inquiries use an
+immutable revision once it is selected. API keys need `inquiry_policy:read` to
+inspect policies and `inquiry_policy:write` to manage them.
+
+Create and preview a policy before activating its first revision:
+
+```bash
+answerlayer inquiry-policies preview \
+  --output-format table_first \
+  --precision-mode significant_figures --precision-value 4 \
+  --require-identifiers --require-numeric-support \
+  --insufficient-data ask_for_clarification \
+  --proxy-behavior require_confirmation \
+  --guidance "Lead with the decision-relevant result." --json
+
+answerlayer inquiry-policies create \
+  --name "Board answers" \
+  --description "Concise, board-ready answers" \
+  --output-format table_first \
+  --precision-mode significant_figures --precision-value 4 \
+  --require-identifiers --require-numeric-support \
+  --insufficient-data ask_for_clarification \
+  --proxy-behavior require_confirmation \
+  --guidance "Lead with the decision-relevant result." --json
+
+answerlayer inquiry-policies activate "Board answers" 1 --json
+```
+
+Policy options accept these values:
+
+- `--output-format`: `concise`, `narrative`, or `table_first`.
+- `--precision-mode`: `preserve_source`, `minimum_decimal_places` (value
+  `0-10`), or `significant_figures` (value `1-15`). `preserve_source` does not
+  accept `--precision-value`.
+- Evidence switches: `--require-identifiers` / `--no-require-identifiers` and
+  `--require-numeric-support` / `--no-require-numeric-support`.
+- `--insufficient-data`: `explain_and_stop`, `ask_for_clarification`, or
+  `conditional_proxy`.
+- `--proxy-behavior`: `forbid_unconfirmed`, `require_confirmation`, or
+  `allow_with_prominent_qualification`.
+- `--guidance`: optional administrator instructions for tone, structure,
+  terminology, and caveats. Platform safety and data-authority rules retain
+  higher precedence.
+
+Create a new immutable draft revision, then activate it explicitly:
+
+```bash
+answerlayer inquiry-policies revise "Board answers" \
+  --output-format concise \
+  --precision-mode preserve_source \
+  --guidance "State the result before supporting detail." --json
+answerlayer inquiry-policies activate "Board answers" 2 --json
+```
+
+Set the active policy as the organization default or override it for one
+connection. Resolution precedence is explicit policy, connection default,
+organization default, then the built-in platform policy:
+
+```bash
+answerlayer inquiry-policies set-default organization "Board answers" --json
+answerlayer inquiry-policies set-default connection <connection-id> "Board answers" --json
+answerlayer inquiry-policies effective --connection <connection-id> --json
+answerlayer inquiry-policies clear-default connection <connection-id>
+```
+
+Omit `--policy` to use those defaults, or pin a policy and exact revision for a
+new inquiry or evaluation run. Existing sessions and runs remain pinned even if
+a different revision is activated later:
+
+```bash
+answerlayer inquiry create-session --connection <connection-id> \
+  --policy "Board answers" --policy-version 2 --json
+answerlayer evals runs create --suite <suite-id> \
+  --policy "Board answers" --policy-version 2 --json
+```
+
 ## Operate API pipelines
 
 API pipeline authoring and lifecycle operations are CLI-first. The AnswerLayer

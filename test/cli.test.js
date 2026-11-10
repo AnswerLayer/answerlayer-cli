@@ -1009,6 +1009,294 @@ test("inquiry models lists the deployment's available model catalog", async () =
   assert.match(output.text(), /GPT-5\.6 Terra/);
 });
 
+test("inquiry create-session resolves a policy name and exact version", async () => {
+  const originalFetch = globalThis.fetch;
+  const policyId = "11111111-1111-4111-8111-111111111111";
+  const revisionId = "22222222-2222-4222-8222-222222222222";
+  const requests = [];
+
+  globalThis.fetch = async (url, init) => {
+    const requestUrl = new URL(String(url));
+    requests.push({ path: requestUrl.pathname, method: init.method, body: init.body });
+    if (requestUrl.pathname === "/api/v1/inquiry-policies") {
+      return jsonResponse([{ id: policyId, name: "Finance standard" }]);
+    }
+    if (requestUrl.pathname === `/api/v1/inquiry-policies/${policyId}`) {
+      return jsonResponse({
+        id: policyId,
+        name: "Finance standard",
+        revisions: [{ id: revisionId, version: 2, status: "active" }],
+      });
+    }
+    if (requestUrl.pathname === "/api/v1/inquiry/sessions") {
+      assert.deepEqual(JSON.parse(init.body), {
+        connection_id: "connection-id",
+        policy_id: policyId,
+        policy_revision_id: revisionId,
+      });
+      return jsonResponse({ session_id: "session-id" }, 201);
+    }
+    return jsonResponse({ detail: "unexpected request" }, 500);
+  };
+
+  try {
+    await main([
+      "inquiry", "create-session",
+      "--connection", "connection-id",
+      "--policy", "Finance standard",
+      "--policy-version", "2",
+      "--base-url", "https://answerlayer.example",
+      "--api-key", "al_test",
+      "--json",
+    ], {
+      env: {},
+      stdin: readableStdin(),
+      stdout: captureStream(),
+      stderr: captureStream(),
+    });
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+
+  assert.deepEqual(requests.map(({ path, method }) => [method, path]), [
+    ["GET", "/api/v1/inquiry-policies"],
+    ["GET", `/api/v1/inquiry-policies/${policyId}`],
+    ["POST", "/api/v1/inquiry/sessions"],
+  ]);
+});
+
+test("inquiry-policies create maps typed policy flags", async () => {
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async (url, init) => {
+    assert.equal(new URL(String(url)).pathname, "/api/v1/inquiry-policies");
+    assert.equal(init.method, "POST");
+    assert.deepEqual(JSON.parse(init.body), {
+      name: "Board answers",
+      description: "Concise board-ready answers",
+      config: {
+        output_format: "table_first",
+        numeric_precision: { mode: "significant_figures", value: 4 },
+        insufficient_data_behavior: "explain_and_stop",
+        proxy_behavior: "forbid_unconfirmed",
+        evidence: {
+          require_identifiers: true,
+          require_numeric_support: false,
+        },
+      },
+      administrator_guidance: "Lead with the decision-relevant result.",
+    });
+    return jsonResponse({ id: "policy-id", name: "Board answers" }, 201);
+  };
+
+  try {
+    await main([
+      "inquiry-policies", "create",
+      "--name", "Board answers",
+      "--description", "Concise board-ready answers",
+      "--output-format", "table_first",
+      "--precision-mode", "significant_figures",
+      "--precision-value", "4",
+      "--insufficient-data", "explain_and_stop",
+      "--proxy-behavior", "forbid_unconfirmed",
+      "--require-identifiers",
+      "--no-require-numeric-support",
+      "--guidance", "Lead with the decision-relevant result.",
+      "--base-url", "https://answerlayer.example",
+      "--api-key", "al_test",
+      "--json",
+    ], {
+      env: {},
+      stdin: readableStdin(),
+      stdout: captureStream(),
+      stderr: captureStream(),
+    });
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test("inquiry-policies reject malformed versions and precision values before calling the API", async () => {
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async () => assert.fail("API should not be called");
+  const io = {
+    env: {},
+    stdin: readableStdin(),
+    stdout: captureStream(),
+    stderr: captureStream(),
+  };
+  const auth = ["--base-url", "https://answerlayer.example", "--api-key", "al_test"];
+
+  try {
+    for (const invalidVersion of ["2.5", "2oops", "0"]) {
+      await assert.rejects(
+        main([
+          "inquiry-policies", "activate",
+          "11111111-1111-4111-8111-111111111111",
+          invalidVersion,
+          ...auth,
+        ], io),
+        /positive integer or revision UUID/,
+      );
+    }
+    for (const invalidPrecision of ["2.5", "2oops", "16", "0"]) {
+      await assert.rejects(
+        main([
+          "inquiry-policies", "preview",
+          "--precision-mode", "significant_figures",
+          "--precision-value", invalidPrecision,
+          ...auth,
+        ], io),
+        /precision-value/,
+      );
+    }
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test("inquiry-policies preview, revise, activate, and archive use lifecycle endpoints", async () => {
+  const originalFetch = globalThis.fetch;
+  const policyId = "11111111-1111-4111-8111-111111111111";
+  const baseRevisionId = "22222222-2222-4222-8222-222222222222";
+  const candidateRevisionId = "33333333-3333-4333-8333-333333333333";
+  const requests = [];
+
+  globalThis.fetch = async (url, init) => {
+    const requestUrl = new URL(String(url));
+    const body = init.body ? JSON.parse(init.body) : undefined;
+    requests.push({ method: init.method, path: requestUrl.pathname, body });
+    if (init.method === "GET" && requestUrl.pathname === `/api/v1/inquiry-policies/${policyId}`) {
+      return jsonResponse({
+        id: policyId,
+        revisions: [{ id: candidateRevisionId, version: 2, status: "draft" }],
+      });
+    }
+    return jsonResponse({ id: policyId }, init.method === "POST" ? 201 : 200);
+  };
+
+  try {
+    const auth = ["--base-url", "https://answerlayer.example", "--api-key", "al_test", "--json"];
+    const io = { env: {}, stdin: readableStdin(), stdout: captureStream(), stderr: captureStream() };
+    await main([
+      "inquiry-policies", "preview",
+      "--output-format", "narrative",
+      "--precision-mode", "minimum_decimal_places",
+      "--precision-value", "2",
+      ...auth,
+    ], io);
+    await main([
+      "inquiry-policies", "revise", policyId,
+      "--output-format", "concise",
+      "--base-revision", baseRevisionId,
+      ...auth,
+    ], io);
+    await main(["inquiry-policies", "activate", policyId, "2", ...auth], io);
+    await main(["inquiry-policies", "archive", policyId, ...auth], io);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+
+  assert.deepEqual(requests, [
+    {
+      method: "POST",
+      path: "/api/v1/inquiry-policies/preview",
+      body: {
+        config: {
+          output_format: "narrative",
+          numeric_precision: { mode: "minimum_decimal_places", value: 2 },
+        },
+      },
+    },
+    {
+      method: "POST",
+      path: `/api/v1/inquiry-policies/${policyId}/revisions`,
+      body: {
+        config: { output_format: "concise" },
+        base_revision_id: baseRevisionId,
+      },
+    },
+    {
+      method: "GET",
+      path: `/api/v1/inquiry-policies/${policyId}`,
+      body: undefined,
+    },
+    {
+      method: "POST",
+      path: `/api/v1/inquiry-policies/${policyId}/revisions/${candidateRevisionId}/activate`,
+      body: undefined,
+    },
+    {
+      method: "POST",
+      path: `/api/v1/inquiry-policies/${policyId}/archive`,
+      body: undefined,
+    },
+  ]);
+});
+
+test("inquiry-policies manage organization and connection defaults", async () => {
+  const originalFetch = globalThis.fetch;
+  const policyId = "11111111-1111-4111-8111-111111111111";
+  const connectionId = "22222222-2222-4222-8222-222222222222";
+  const requests = [];
+
+  globalThis.fetch = async (url, init) => {
+    const requestUrl = new URL(String(url));
+    requests.push({
+      method: init.method,
+      path: requestUrl.pathname,
+      query: Object.fromEntries(requestUrl.searchParams),
+      body: init.body ? JSON.parse(init.body) : undefined,
+    });
+    if (init.method === "DELETE") return new Response(null, { status: 204 });
+    return jsonResponse({ policy_id: policyId });
+  };
+
+  try {
+    const auth = ["--base-url", "https://answerlayer.example", "--api-key", "al_test", "--json"];
+    const io = { env: {}, stdin: readableStdin(), stdout: captureStream(), stderr: captureStream() };
+    await main(["inquiry-policies", "set-default", "organization", policyId, ...auth], io);
+    await main(["inquiry-policies", "set-default", "connection", connectionId, policyId, ...auth], io);
+    await main(["inquiry-policies", "effective", "--connection", connectionId, ...auth], io);
+    await main(["inquiry-policies", "clear-default", "connection", connectionId, ...auth], io);
+    await main(["inquiry-policies", "clear-default", "organization", ...auth], io);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+
+  assert.deepEqual(requests, [
+    {
+      method: "PUT",
+      path: "/api/v1/inquiry-policies/defaults/organization",
+      query: {},
+      body: { policy_id: policyId },
+    },
+    {
+      method: "PUT",
+      path: `/api/v1/inquiry-policies/defaults/connections/${connectionId}`,
+      query: {},
+      body: { policy_id: policyId },
+    },
+    {
+      method: "GET",
+      path: "/api/v1/inquiry-policies/defaults/effective",
+      query: { connection_id: connectionId },
+      body: undefined,
+    },
+    {
+      method: "DELETE",
+      path: `/api/v1/inquiry-policies/defaults/connections/${connectionId}`,
+      query: {},
+      body: undefined,
+    },
+    {
+      method: "DELETE",
+      path: "/api/v1/inquiry-policies/defaults/organization",
+      query: {},
+      body: undefined,
+    },
+  ]);
+});
+
 test("evals suites create maps common flags to the evaluation API", async () => {
   const originalFetch = globalThis.fetch;
   const output = captureStream();
@@ -2959,6 +3247,13 @@ function countDemoCreateRequests(requests) {
       return [resource, requests.filter(request => request.method === "POST" && request.pathname === pathName).length];
     }),
   );
+}
+
+function jsonResponse(data, status = 200) {
+  return new Response(JSON.stringify(data), {
+    status,
+    headers: { "content-type": "application/json" },
+  });
 }
 
 function captureStream() {
