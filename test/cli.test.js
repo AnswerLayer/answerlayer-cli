@@ -1490,6 +1490,7 @@ test("optimize start rejects obsolete analysis-model usage", async () => {
   await assert.rejects(
     main([
       "optimize", "start",
+      "--base-url", "https://answerlayer.example",
       "--name", "Optimizer",
       "--connection", "connection-1",
       "--suite", "suite-1",
@@ -1503,6 +1504,7 @@ test("optimize start rejects obsolete analysis-model usage", async () => {
 test("optimize start rejects fractional and out-of-range agent budgets", async () => {
   const base = [
     "optimize", "start",
+    "--base-url", "https://answerlayer.example",
     "--name", "Optimizer",
     "--connection", "connection-1",
     "--suite", "suite-1",
