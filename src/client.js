@@ -10,7 +10,7 @@ export class AnswerLayerApiError extends Error {
 export class AnswerLayerClient {
   constructor({ baseUrl, apiKey, fetchImpl = globalThis.fetch }) {
     if (!baseUrl) {
-      throw new Error("Missing API base URL. Run `answerlayer configure --base-url <url> --api-key <key>` or set ANSWERLAYER_BASE_URL.");
+      throw new Error("Missing API base URL. Pass `--base-url <url>`, run `answerlayer configure --base-url <url> --api-key <key>`, or set ANSWERLAYER_BASE_URL.");
     }
 
     if (!fetchImpl) {

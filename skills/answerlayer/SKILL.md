@@ -109,8 +109,8 @@ Use whichever it prints as `AL` below. They all run identical code.
 
 ## 2. Ensure it's configured
 
-The CLI needs a base URL (defaults to `https://app.answerlayer.io`) and an API
-key sent as `X-API-Key`. Check whether credentials already exist:
+The CLI needs the base URL for the user's AnswerLayer install and an API key
+sent as `X-API-Key`. Check whether credentials already exist:
 
 ```bash
 AL auth me --json
@@ -119,18 +119,17 @@ AL auth me --json
 - If it returns the caller's identity, you're configured — continue to step 3.
 - If it errors with a missing-key/auth error, set credentials up:
 
-  1. Ask the user for their **API key**. Also ask for their **host** only if
-     they're on a BYOC / self-hosted install; otherwise the default
-     `https://app.answerlayer.io` is correct.
-  2. Configure (omit `--base-url` to accept the default):
+  1. Ask the user for their **API key** and the **base URL** of their local,
+     BYOC, or self-hosted install.
+  2. Configure:
 
      ```bash
-     AL init --api-key <KEY> [--base-url https://answerlayer.their-host.com]
+     AL init --base-url https://answerlayer.their-host.com --api-key <KEY>
      ```
 
      This verifies the key before writing `~/.answerlayer/config.json` (mode
-     0600). Alternatively the user can export `ANSWERLAYER_API_KEY` (and
-     optionally `ANSWERLAYER_BASE_URL`).
+     0600). Alternatively the user can export `ANSWERLAYER_API_KEY` and
+     `ANSWERLAYER_BASE_URL`.
   3. Re-run `AL auth me --json` to confirm.
 
 **Never print, echo, or log the API key.** Pass it straight to `init`. Tell

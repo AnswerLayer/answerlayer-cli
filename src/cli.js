@@ -83,8 +83,8 @@ function configure(parsed, io) {
   const baseUrl = firstValue(parsed.flags.baseUrl) || existing.baseUrl || DEFAULT_BASE_URL;
   const apiKey = firstValue(parsed.flags.apiKey) || existing.apiKey;
 
-  if (!apiKey) {
-    throw usage("configure requires --api-key (--base-url defaults to https://app.answerlayer.io)");
+  if (!baseUrl || !apiKey) {
+    throw usage("configure requires --base-url and --api-key");
   }
 
   const configPath = writeConfig({ ...existing, baseUrl, apiKey }, io.env);

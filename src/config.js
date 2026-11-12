@@ -2,10 +2,10 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 
-// Default to the hosted AnswerLayer SaaS. Override with --base-url, the
-// ANSWERLAYER_BASE_URL env var, or `answerlayer configure` for BYOC /
-// self-hosted installs.
-export const DEFAULT_BASE_URL = "https://app.answerlayer.io";
+// There is no network default. Every local, BYOC, or self-hosted install has
+// its own endpoint, supplied through --base-url, ANSWERLAYER_BASE_URL, or the
+// saved configuration.
+export const DEFAULT_BASE_URL = null;
 
 export function defaultConfigPath(env = process.env) {
   return env.ANSWERLAYER_CONFIG || path.join(os.homedir(), ".answerlayer", "config.json");
