@@ -1391,6 +1391,8 @@ test("optimize start freezes explicit policies, budgets, models, and selectors",
     assert.equal(body.models.analysis, undefined);
     assert.equal(body.models.repair, undefined);
     assert.equal(body.budget.max_iterations, 4);
+    assert.equal(body.budget.max_input_tokens, 750000);
+    assert.equal(body.budget.max_output_tokens, 125000);
     assert.equal(body.budget.max_agent_turns, 25);
     assert.equal(body.budget.max_validation_attempts, 6);
     assert.equal(body.budget.max_targeted_evals, 2);
@@ -1416,6 +1418,8 @@ test("optimize start freezes explicit policies, budgets, models, and selectors",
       "--category", "habitability",
       "--tag", "exoearth",
       "--max-iterations", "4",
+      "--max-input-tokens", "750000",
+      "--max-output-tokens", "125000",
       "--max-agent-turns", "25",
       "--max-validation-attempts", "6",
       "--max-targeted-evals", "2",
@@ -1425,6 +1429,34 @@ test("optimize start freezes explicit policies, budgets, models, and selectors",
   }
 
   assert.equal(JSON.parse(output.text()).id, "run-1");
+});
+
+test("optimize start omits token ceilings unless explicitly configured", async () => {
+  const originalFetch = globalThis.fetch;
+
+  globalThis.fetch = async (_url, init) => {
+    const body = JSON.parse(init.body);
+    assert.equal(Object.hasOwn(body.budget, "max_input_tokens"), false);
+    assert.equal(Object.hasOwn(body.budget, "max_output_tokens"), false);
+    return new Response(JSON.stringify({ id: "run-1" }), {
+      status: 201,
+      headers: { "content-type": "application/json" },
+    });
+  };
+
+  try {
+    await main([
+      "optimize", "start",
+      "--base-url", "https://answerlayer.example",
+      "--api-key", "al_live_test",
+      "--name", "Optimizer",
+      "--connection", "connection-1",
+      "--suite", "suite-1",
+      "--model", "openai.gpt-5.6-luna",
+    ], { env: {}, stdin: readableStdin(), stdout: captureStream(), stderr: captureStream() });
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
 });
 
 test("optimize start uses the explicit proposal model for the coherent agent", async () => {

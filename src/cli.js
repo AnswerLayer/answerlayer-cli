@@ -1275,8 +1275,8 @@ async function handleOptimization(client, command, positionals, parsed, io) {
       budget: {
         max_iterations: numberFlag(parsed.flags.maxIterations, 3),
         max_proposals: numberFlag(parsed.flags.maxProposals, 10),
-        max_input_tokens: numberFlag(parsed.flags.maxInputTokens, 250000),
-        max_output_tokens: numberFlag(parsed.flags.maxOutputTokens, 50000),
+        max_input_tokens: numberFlag(parsed.flags.maxInputTokens),
+        max_output_tokens: numberFlag(parsed.flags.maxOutputTokens),
         max_sql_queries: numberFlag(parsed.flags.maxSqlQueries, 500),
         max_duration_seconds: numberFlag(parsed.flags.maxDuration, 7200),
         max_agent_turns: parseBoundedInteger(
