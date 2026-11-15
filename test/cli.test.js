@@ -1438,6 +1438,7 @@ test("optimize start omits token ceilings unless explicitly configured", async (
     const body = JSON.parse(init.body);
     assert.equal(Object.hasOwn(body.budget, "max_input_tokens"), false);
     assert.equal(Object.hasOwn(body.budget, "max_output_tokens"), false);
+    assert.equal(body.budget.max_targeted_evals, 10);
     return new Response(JSON.stringify({ id: "run-1" }), {
       status: 201,
       headers: { "content-type": "application/json" },
