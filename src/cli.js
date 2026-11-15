@@ -1287,7 +1287,7 @@ async function handleOptimization(client, command, positionals, parsed, io) {
         ) ?? 10,
         max_targeted_evals: parseBoundedInteger(
           firstValue(parsed.flags.maxTargetedEvals), "max-targeted-evals", 0, 25,
-        ) ?? 3,
+        ) ?? 10,
       },
       objectives: {
         minimum_score_improvement: numberFlag(parsed.flags.minImprovement, 0.5),
